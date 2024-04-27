@@ -11,6 +11,10 @@ import calc
 from mean_cos import BaseCos
 from coef_from_grid import calc_coefs
 
+from db_connector import Connector
+
+from typing import Union
+
 class CoefCalculator:
     """
         This class performs splitting given molecule on
@@ -27,7 +31,8 @@ class CoefCalculator:
                  method_of_calc : str = default_vals.DEFAULT_ORCA_METHOD,
                  charge : int = default_vals.DEFAULT_CHARGE,
                  multipl : int = default_vals.DEFAULT_MULTIPL,
-                 degrees : np.ndarray = np.linspace(0, 2 * np.pi, 37).reshape(37, 1)):
+                 degrees : np.ndarray = np.linspace(0, 2 * np.pi, 37).reshape(37, 1),
+                 db_connector : Union[Connector, None] = None):
         """
             mol - rdkit molecule
             dir_for_inps - path to directory, where scan .inp files will generates
@@ -53,6 +58,11 @@ class CoefCalculator:
         self.unique_frags = {}
         # Key is atom idxs, val is idx
         self.frags = {}
+
+        self.db_connector = db_connector
+
+        self.scanfile2smiles = {} # k - scan_file, v - smiles
+        self.fetched_coefs = {} # k - smiles, v - coefs
 
     def is_terminal(self,
                     atom : Chem.rdchem.Atom) -> bool:
@@ -128,7 +138,27 @@ class CoefCalculator:
 
         return True
 
-    def get_unique_mols(self,
+    def get_unique_mols(
+        self,
+        lst : list[Chem.rdchem.Mol]
+    ) -> list[Chem.rdchem.Mol]:
+        """
+            Return unqiue mols from lst. Leave first occurance only
+        """
+
+        occured_smiles = set()
+        result = []
+        
+        for cur_mol in lst:
+            cur_smiles = Chem.MolToSmiles(cur_mol)
+            if cur_smiles in occured_smiles:
+                continue
+            result.append(cur_mol)
+            occured_smiles.add(cur_smiles)
+
+        return result
+
+    def __get_unique_mols(self,
                         lst : list[Chem.rdchem.Mol]) -> list[Chem.rdchem.Mol]:
         """
             get unique molecules from list
@@ -271,8 +301,22 @@ class CoefCalculator:
 
         angle_number = 0
 
+        select_request = 'select a1, a2, a3, b1, b2, b3, c from dihedrals where ((dihedral_smiles = \"{smiles}\" and (method = \"{method}\")))'
+
         for sub_mol in self.get_interesting_frags():
+
             cur_mol = sub_mol
+            cur_mol_smiles = Chem.MolToSmiles(Chem.RemoveHs(cur_mol))
+
+            db_response = self.db_connector.get_request(
+                select_request.format(
+                    smiles=cur_mol_smiles,
+                    method=self.method_of_calc
+                )
+            )
+            if len(db_response) > 0:
+                self.fetched_coefs[cur_mol_smiles] = db_response[0]
+
             SetDihedralRad(cur_mol.GetConformer(), 
                            *self.get_idxs_to_rotate(cur_mol),
                            0)
@@ -282,33 +326,38 @@ class CoefCalculator:
             self.generate_scan_inp(self.get_coords_from_xyz_block(xyz), idxs_to_rotate, filename)
             inp_names.append(filename)
             angle_number += 1
-
+            self.scanfile2smiles[filename] = cur_mol_smiles
+    
         return inp_names
 
     def get_energies_from_scans(self,
-                                lst : list[str]) -> np.ndarray:
+                                lst : list[str]) -> list[tuple[str, list[float]]]:
         """
             lst - list of input file paths,
             return list of lists of energies in
             [0.0, 360.0] with step = 10 degrees
         """
-
-        out_names = list(map(lambda s : s[:-3] + "out", lst))
-        for out_name in out_names:
-            calc.wait_for_the_end_of_calc(out_name, 1000)
-
-        res_file_names = list(map(lambda s : s[:-3] + "relaxscanact.dat", lst))
+        for inp_name in lst:
+            out_name = inp_name[:-3] + "out"
+            if not (self.scanfile2smiles[inp_name] in self.fetched_coefs):
+                calc.wait_for_the_end_of_calc(out_name, 1000)
 
         result = []
 
-        for res_file in res_file_names:
+        for inp_name in lst:
+            res_file_name = inp_name[:-3] + "relaxscanact.dat"
+
+            if self.scanfile2smiles[inp_name] in self.fetched_coefs:
+                result.append(None)
+                continue
+
             cur_res = []
-            with open(res_file, "r") as file:
+            with open(res_file_name, "r") as file:
                 for line in file:
                     cur_res.append(float(line[:-1].split()[1]))
             result.append(np.array(cur_res))
 
-        return np.array(result)
+        return zip(lst, result)
 
     def get_scans_of_dihedrals(self) -> np.ndarray:
         """
@@ -317,19 +366,43 @@ class CoefCalculator:
 
         inp_files = self.generate_scan_inps_from_mol()
         for cur in inp_files:
-            calc.start_calc(cur)
+            if not (self.scanfile2smiles[cur] in self.fetched_coefs):
+                calc.start_calc(cur)    
         return self.get_energies_from_scans(inp_files)
 
     def calc(self) -> list[list[float]]:
         """
             Calculate coefs for mean function
         """
-
         res = []
-
-        for energies in self.get_scans_of_dihedrals():
+        inp_filenames = []
+        for inp_filename, energies in self.get_scans_of_dihedrals():
+            inp_filenames.append(inp_filename)
+            if self.scanfile2smiles[inp_filename] in self.fetched_coefs:
+                res.append(self.fetched_coefs[self.scanfile2smiles[inp_filename]])
+                continue
             res.append(calc_coefs(self.degrees, energies))
-        print("Sucessful calculated!")        
+        
+        print(f"Sucessful calculated {len(inp_filenames) - len(self.fetched_coefs)} coefs and fetched from db {len(self.fetched_coefs)} coefs!")    
+        
+        insert_request_template = 'insert into dihedrals (dihedral_smiles, method, a1, a2, a3, b1, b2, b3, c) values (\"{smiles}\", \"{method}\", {a1}, {a2}, {a3}, {b1}, {b2}, {b3}, {c})'
+        
+        for inp_filename, coefs in zip(inp_filenames, res):
+            if self.scanfile2smiles[inp_filename] in self.fetched_coefs:
+                continue
+            self.db_connector.set_request(
+                insert_request_template.format(**{
+                    'smiles' : self.scanfile2smiles[inp_filename],
+                    'method' : self.method_of_calc,
+                    'a1' : coefs[0],
+                    'a2' : coefs[1],
+                    'a3' : coefs[2],
+                    'b1' : coefs[3],
+                    'b2' : coefs[4],
+                    'b3' : coefs[5],
+                    'c' : coefs[6]
+                })
+            )
 
         return res
 
@@ -338,13 +411,15 @@ class CoefCalculator:
             Get matrix of coefficients for mean function 
             for all dihedral angels 
         """  
-        print("Hello")
         unique_coefs = self.calc()
         result = []        
-
-        print(self.frags)
+        print(f"Frags: {self.frags}")
 
         for idxs in self.frags:
             result.append((list(idxs), unique_coefs[self.frags[idxs]]))
+        
+        print("DB Content:")
+        for cur in self.db_connector.get_request('select * from dihedrals'):
+            print(*cur, sep='|')
 
         return result

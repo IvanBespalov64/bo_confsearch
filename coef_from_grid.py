@@ -24,6 +24,14 @@ def pes_tf(
 ) -> tf.Tensor:
     return A11 * tf.cos(b11 * x) + A21 * tf.cos(2 * b21 * x) + A31 * tf.cos(3 * b31 * x) + c1
 
+def pes_tf_grad(
+    x : tf.Tensor,
+    A11 : float, A21 : float, A31 : float,
+    b11 : float, b21 : float, b31 : float,
+    c1 : float
+) -> tf.Tensor:
+    return -(A11 * b11 * tf.sin(b11 * x) + A21 * 2 * b21 * tf.sin(2 * b21 * x) + A31 * 3 * b31 * tf.sin(3 * b31 * x))
+
 def calc_coefs(
     x : np.ndarray,
     y : np.ndarray,

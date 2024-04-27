@@ -231,7 +231,7 @@ def calc_energy(
         dihedrals : list[dihedral] = [],
         norm_energy : float = 0, 
         save_structs : bool = True,
-        RANDOM_DISPLACEMENT : bool = False,
+        #RANDOM_DISPLACEMENT : bool = False,
         constrained_opt : bool = False,
         force_xyz_block : Union[None, str] = None
     ) -> float:
@@ -314,11 +314,14 @@ def dihedral_angle(a : list[float], b : list[float], c : list[float], d : list[f
                        np.dot(nIJK, nJKL) / np.sqrt(lengthSq(nIJK) * lengthSq(nJKL)))
     return (res + 2 * np.pi) % (2 * np.pi)
        
-def parse_points_from_trj(trj_file_name : str,
-                          dihedrals : list,
-                          norm_en : float, 
-                          save_structs : bool = True,
-                          structures_path : str = "structs/") -> list[tuple[list[dihedral], float]]:
+def parse_points_from_trj(
+    trj_file_name : str,
+    dihedrals : list,
+    norm_en : float, 
+    save_structs : bool = True,
+    structures_path : str = "structs/", 
+    return_minima : bool = True
+) -> Union[list[tuple[list[dihedral], float]], tuple[list[tuple[list[dihedral], float]], tuple[list[dihedral], float]]]:
     """
         Parse more points from trj orca file
         returns list of description of dihedrals
@@ -355,30 +358,29 @@ def parse_points_from_trj(trj_file_name : str,
                 cur_d.append(dihedral_angle(a_coord, b_coord, c_coord, d_coord))
             result.append((cur_d, energy))
     
-    #We skip last point because of we put it into the dataset after first query of calc
-    points, obs = list(zip(*result))
+    points, obs = list(zip(*result[1:]))
 
     print(f"Points in trj: {len(result)}")
-    print(result)
+    #print(result)
    
     num_of_clusters = min(4, len(points))
     print(f"Num of clusters: {num_of_clusters}")
 
     vals = {cluster_id : (1e9, -1) for cluster_id in range(num_of_clusters)}
 
-    print(points)
-    print(len(points))
+    #print(points)
+    #print(len(points))
 
     model = KMeans(n_clusters=num_of_clusters)
     model.fit(points)
     
     for i in range(len(points)):
         cluster = model.predict([points[i]])[0]
-        print(cluster)
+        #print(cluster)
         if vals[cluster][0] > obs[i]:
             vals[cluster] = obs[i], i
-    print(len(vals))
-    print(vals)
+    #print(len(vals))
+    #print(vals)
     print(f"PARSING POINTS, CLUSTER NUM = {num_of_clusters}")
     if save_structs:
         print("SAVING STRUCTS")
@@ -389,4 +391,4 @@ def parse_points_from_trj(trj_file_name : str,
                 print("saved")
             CURRENT_STRUCTURE_ID += 1
     
-    return [(points[vals[cluster_id][1]], vals[cluster_id][0]) for cluster_id in vals]
+    return [result[0]] + [(points[vals[cluster_id][1]], vals[cluster_id][0]) for cluster_id in vals], result[-1]

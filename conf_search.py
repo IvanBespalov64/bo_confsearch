@@ -2,7 +2,9 @@
 
 from transform_kernel import TransformKernel
 
-from coef_from_grid import pes, pes_tf
+from grad_gpr import GPRwithGrads
+
+from coef_from_grid import pes, pes_tf, pes_tf_grad
 
 from calc import calc_energy, load_last_optimized_structure_xyz_block
 from calc import change_dihedrals
@@ -10,8 +12,12 @@ from calc import parse_points_from_trj
 
 from coef_calc import CoefCalculator
 
+from db_connector import LocalConnector
+
 from sparse_ei import SparseExpectedImprovement
+from sparse_grad_based_ei import SparseGradExpectedImprovement
 from explor_imp import ExplorationImprovement
+from imp_var import ImprovementVariance
 
 import trieste
 import gpflow
@@ -27,6 +33,8 @@ from mean_cos import BaseCos, BaseCosMod
 import plotly.graph_objects as go
 from scipy.special import erf
 import sys
+import yaml
+import json
 
 from trieste.acquisition.function import ExpectedImprovement
 
@@ -37,15 +45,23 @@ from sklearn.cluster import DBSCAN
 from tensorflow.python.ops.numpy_ops import np_config
 np_config.enable_numpy_behavior()
 
-MOL_FILE_NAME = "tests/cur.mol"
+MOL_FILE_NAME = None# "tests/cur.mol"
 NORM_ENERGY = 0.
-RANDOM_DISPLACEMENT = True
+#RANDOM_DISPLACEMENT = True
 
 DIHEDRAL_IDS = []
 
 CUR_ADD_POINTS = []
 
 global_degrees = []
+
+MINIMA = []
+
+ASKED_POINTS = []
+
+model_chk = None
+current_minima = 1e9
+acq_vals_log = []
 
 def degrees_to_potentials(
     degrees : np.ndarray,
@@ -79,18 +95,36 @@ def calc(dihedrals : list[float]) -> float:
         Perofrms calculating of energy with current dihedral angels
     """
     
+    if model_chk:
+        print(f"Checkpoint is not null, calculating previous acq. func. max!")
+        dihedrals_tf = tf.constant(dihedrals, dtype=tf.float64)
+        if len(dihedrals_tf.shape) == 1:
+            dihedrals_tf = tf.reshape(dihedrals_tf, [1, dihedrals_tf.shape[0]])
+        print(f"Cur dihedrals_tf: {dihedrals_tf}")
+        print(f"Current minima: {current_minima}")
+        mean, variance = model_chk.predict_f(dihedrals_tf)
+        normal = tfp.distributions.Normal(mean, tf.sqrt(variance))
+        tau = current_minima + 3.
+        acq_val = normal.cdf(tau) * (((tau - mean)**2) * (1 - normal.cdf(tau)) + variance) + tf.sqrt(variance) * normal.prob(tau) *\
+                (tau - mean) * (1 - 2*normal.cdf(tau)) - variance * (normal.prob(tau)**2)
+        print(f"Previous acq. val: {acq_val}")
+        acq_vals_log.append(acq_val.numpy().flatten()[0])        
+
     if tf.is_tensor(dihedrals):
         dihedrals = list(dihedrals.numpy())
 
+    ASKED_POINTS.append(dihedrals)
+    
+    print(f"Point: {dihedrals}")
 
     #Pre-opt
     print('Optimizing constrained struct')
-    _ = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, RANDOM_DISPLACEMENT, constrained_opt=True)
+    _ = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, constrained_opt=True)
     print('Optimized!\nLoading xyz from preopt')
     xyz_from_constrained = load_last_optimized_structure_xyz_block(MOL_FILE_NAME)
     print('Loaded!\nFull opt')
-    en = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, RANDOM_DISPLACEMENT, force_xyz_block=xyz_from_constrained)
-    print('Optimized!')
+    en = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, force_xyz_block=xyz_from_constrained)
+    print(f'Optimized! En = {en}')
 
     return en
 
@@ -157,7 +191,10 @@ def save_acq(file_name : str,
         Saves plot of ExpectedImporovement acquisitioon function
     """
     x, y = zip(*points)
-    
+   
+    left_borders, right_borders = roi_calc(model, points)
+ 
+ 
     fig = go.Figure()
     xx = np.linspace(0, 2 * np.pi, 30)
     yy = xx
@@ -170,14 +207,71 @@ def save_acq(file_name : str,
     vals = np.array(vals)
 
     mean, variance = model.predict_f(pred_points)
+ 
+    left_borders, right_borders = roi_calc(model, MINIMA)
+
+    #grads = model.predict_grad(tf.constant(points, dtype=tf.float64))
+    #print(grads.numpy())
+
     normal = tfp.distributions.Normal(mean, tf.sqrt(variance))
     acq_vals =  (cur_minimum - mean) * normal.cdf(cur_minimum) + variance * normal.prob(cur_minimum)
     rdists = tf.math.mod(tf.abs(tf.constant(pred_points.reshape(len(pred_points), 1, 2)) - tf.constant(points.reshape(1, len(points), 2))), 2 * np.pi)
     dists = tf.reshape(tf.reduce_min(
                    tf.math.reduce_max(tf.minimum(rdists, 2*np.pi - rdists), axis=-1), 
                                 axis=-1), [pred_points.shape[0], 1])
-    fig.add_surface(x=xx, y=yy, z=tf.where(dists > np.pi/6, acq_vals, 0).numpy().reshape((30, 30)))
+    
+    acq_numpy = acq_vals.numpy()
+    plot_acq = []
+    for i in range(len(acq_numpy)): 
+        plot_acq.append(is_unique(pred_points[i], MINIMA, left_borders, right_borders, hide_asked_points=False) * acq_numpy[i])
+
+    #fig.add_surface(x=xx, y=yy, z=acq_vals.numpy().reshape((30, 30)))
+    fig.add_surface(x=xx, y=yy, z=np.array(plot_acq).reshape((30, 30)))
     fig.write_html(file_name)
+
+def roi_calc(
+    model : GPRwithGrads,
+    points : list
+) -> list:
+    """
+            Gets model with grad supporing and observed points
+            Calculates Regions of Interest (borders where gradient changes the sign)
+    """
+    def equal(
+        a : float, 
+        b : float,
+        eps : float = 1e-6
+    ) -> bool:
+        return np.abs(a - b) < eps
+    
+    dims = len(points[0])
+    right_borders = [(np.pi / 12) * np.ones(dims) for j in range(len(points))]
+    left_borders = [(np.pi / 12) * np.ones(dims) for j in range(len(points))]
+
+    for idx, cur in enumerate(points):
+        cur = np.array(cur)
+
+        for dim in range(dims):
+            cur_mask = np.zeros(dims)
+            cur_mask[dim] = np.pi / 12
+            right_border_init_grad = model.predict_grad(tf.constant([(cur + cur_mask) % (2*np.pi)], dtype=tf.float64)).numpy().flatten()[dim]
+            left_border_init_grad = model.predict_grad(tf.constant([(cur - cur_mask + 2*np.pi) % (2*np.pi)], dtype=tf.float64)).numpy().flatten()[dim]
+            left_flag, right_flag = False, False
+            for i in range(2, 8):
+                if not right_flag:
+                    right_border_grad = model.predict_grad(tf.constant([(cur + i * cur_mask) % (2*np.pi)], dtype=tf.float64)).numpy().flatten()[dim]  
+                if not left_flag:
+                    left_border_grad = model.predict_grad(tf.constant([(cur - i * cur_mask + 2*np.pi) % (2*np.pi)], dtype=tf.float64)).numpy().flatten()[dim]
+                if not right_flag and (right_border_grad*right_border_init_grad < 0):
+                    right_borders[idx][dim] = i*np.pi/12
+                    right_flag = True
+                if not left_flag and (left_border_grad*left_border_init_grad < 0):
+                    left_borders[idx][dim] = i*np.pi/12
+                    left_flag = True
+                if right_flag and left_flag:
+                    continue
+    return left_borders, right_borders
+
 
 def save_prob(file_name : str, model : gpflow.models.gpr.GPR, points : list, vals = None, mean_func_coefs : np.ndarray = None):
     """
@@ -191,7 +285,9 @@ def save_prob(file_name : str, model : gpflow.models.gpr.GPR, points : list, val
     predicted_points = np.vstack((xx_g.flatten(), yy_g.flatten())).T
     mean, var = model.predict_f(predicted_points)
     
-    print(f"Var: {var}\nMean: {mean}")
+    left_borders, right_borders = roi_calc(model, MINIMA)
+    print(f"MINIMA: {MINIMA}") 
+    #print(f"Var: {var}\nMean: {mean}")
 
     print(f"Min var = {np.min(var)}, max var = {np.max(var)}")
     cur_minima = np.min(vals)
@@ -202,24 +298,76 @@ def save_prob(file_name : str, model : gpflow.models.gpr.GPR, points : list, val
     plot_prob = []
     for i in range(len(mean)):
         plot_points.append(predicted_points[i])
-        plot_prob.append(is_unique(predicted_points[i], points) * prob[i])
-    fig.add_trace(go.Surface(x = xx, y = yy, z = np.array(plot_prob).reshape((30, 30)))) # plot_prob
-    fig.add_trace(go.Surface(x = xx, y = yy, z = mean.reshape((30, 30)))) 
+        #plot_prob.append(is_unique(predicted_points[i], MINIMA, left_borders, right_borders) * prob[i])
+        plot_prob.append(is_unique(predicted_points[i], points, left_borders, right_borders) * prob[i])
+    fig.add_trace(go.Surface(x = xx, y = yy, z = np.array(plot_prob).reshape((30, 30)), name='prob')) # plot_prob
+    fig.write_html(file_name)
+    fig = go.Figure() 
+    tau = cur_minima + 3.
+    normal = tfp.distributions.Normal(mean, tf.sqrt(var))
+    acq_vals = normal.cdf(tau) * (((tau - mean)**2) * (1 - normal.cdf(tau)) + var) + tf.sqrt(var) * normal.prob(tau) *\
+                (tau - mean) * (1 - 2*normal.cdf(tau)) - var * (normal.prob(tau)**2)
+    acq_vals = acq_vals.numpy()
+    
+    
+    
+    #ei = (cur_minima - mean) * normal.cdf(cur_minima) + var * normal.prob(cur_minima) 
+    #rdists = tf.math.mod(tf.abs(tf.constant(predicted_points.reshape(len(predicted_points), 1, 2)) - tf.constant(points.reshape(1, len(points), 2))), 2 * np.pi) 
+    #dists = tf.reshape(
+    #    tf.reduce_min(
+    #        tf.math.reduce_max(
+    #            tf.minimum(rdists, 2*np.pi - rdists), axis=-1
+    #        ),
+    #        axis=-1
+    #    ), 
+    #    [predicted_points.shape[0], 1]
+    #).numpy()
+    
+    fig.add_trace(go.Surface(x = xx, y = yy, z = acq_vals.reshape((30, 30)), name='acq_vals')) 
+
+    #fig.add_trace(go.Surface(x = xx, y = yy, z = np.where(dists > (np.pi/6), ei, 0).reshape((30, 30)), name='acq_vals')) 
+
     qx, qy = zip(*points)
     fig.add_scatter3d(x = qx, y = qy, z = vals, mode = "markers")
-    fig.write_html(file_name)
+    fig.write_html(file_name.replace('prob_', 'acq_'))
 
-def is_unique(cur_point : list,
-              points : list, 
-              threshold : float = np.pi / 6) -> int:
+def is_unique(
+    cur_point : list,
+    points : list,
+    left_borders : list,
+    right_borders : list,
+    hide_asked_points : bool = True           
+) -> int:
     """
         Returns 1 if point stands alone in 'threshold'
         in every dimension, 0 otherway
     """  
-    for point in points:
+    
+    def in_segment(
+        x : float,
+        left : float,
+        right : float,
+        eps : float = 1e-6,
+    ) -> bool:
+        left = (left + 2*np.pi) % (2*np.pi)
+        right = (right + 2*np.pi) % (2*np.pi)
+        if left > right:
+            return ((x <= (right + eps)) or ((x >= (left - eps)) and (x <= (2*np.pi + eps))))
+        return ((x >= (left - eps)) and (x <= (right + eps)))
+    
+    if hide_asked_points: 
+       for asked_point in ASKED_POINTS:
+            had_seen = True
+            for dim in range(len(cur_point)):
+                had_seen = had_seen and in_segment(cur_point[dim], asked_point[dim] - (np.pi/6), asked_point[dim] + (np.pi/6))
+            if had_seen:
+                return 0        
+
+    for idx, point in enumerate(points):
         had_seen = True
         for dim in range(len(cur_point)):
-            had_seen = had_seen and (np.abs(cur_point[dim] - point[dim]) <= threshold)
+            #had_seen = had_seen and in_segment(cur_point[dim], point[dim] - left_borders[idx][dim], point[dim] + right_borders[idx][dim])
+            had_seen = had_seen and in_segment(cur_point[dim], point[dim] - (np.pi/12), point[dim] + (np.pi/12))
         if had_seen:
             return 0
     return 1
@@ -274,8 +422,12 @@ def upd_dataset_from_trj(
         Return dataset that consists of old points
         add points from trj
     """
-    
-    degrees, energies = zip(*parse_points_from_trj(trj_filename, DIHEDRAL_IDS, NORM_ENERGY, True, 'structs/'))
+    print(f"Input dataset is: {dataset}") 
+    parsed_data, last_point = parse_points_from_trj(trj_filename, DIHEDRAL_IDS, NORM_ENERGY, True, 'structs/', True)
+    MINIMA.append(last_point[0]) 
+    print(f"Parsed data: {parsed_data}")
+    degrees, energies = zip(*parsed_data)
+    print(f"Degrees: {degrees}\nEnergies: {energies}")
 
     global_degrees.extend(degrees) 
 
@@ -291,8 +443,8 @@ def erase_last_from_dataset(dataset : Dataset, n : int = 1):
         Deletes last n points from trj
     """
     
-    query_points = tf.slice(dataset.query_points, [0, 0], [dataset.query_points.shape[0] - n, 2])
-    observations = tf.slice(dataset.observations, [0, 0], [dataset.observations.shape[0] - n, 1])
+    query_points = tf.slice(dataset.query_points, [0, 0], [dataset.query_points.shape[0] - n, dataset.query_points.shape[1]])
+    observations = tf.slice(dataset.observations, [0, 0], [dataset.observations.shape[0] - n, dataset.observations.shape[1]])
 
     return Dataset(query_points, observations)
 
@@ -309,12 +461,38 @@ class PotentialFunction():
                     ],
                     axis=1
                 )
+    @tf.function
+    def grad(self, X : tf.Tensor) -> tf.Tensor:
+        return tf.stack(
+                    [
+                        pes_tf_grad(X[:, dim], *self.mean_func_coefs[dim]) for dim in range(len(self.mean_func_coefs))
+                    ],
+                    axis=1
+                )
+
+print("Reading config.yaml")
+
+config = {}
+
+try:
+    with open('config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+except FileNotFoundError:
+    print("No config.yaml!\nFinishing!")
+    exit(0)
+except Exception:
+    print("Something went wrong!\nFinishing!")
+    exit(0)
+
+MOL_FILE_NAME = config['mol_file_name']
 
 print("Coef calculator creatring")
 
-coef_matrix = CoefCalculator(Chem.MolFromMolFile(MOL_FILE_NAME), "test_scans/").coef_matrix()
+coef_matrix = CoefCalculator(Chem.MolFromMolFile(MOL_FILE_NAME), "test_scans/", db_connector=LocalConnector('dihedral_logs.db')).coef_matrix()
 
-print("Good")
+exit(0)
+
+print("Coef calculator created!")
 
 mean_func_coefs = []
 
@@ -322,45 +500,52 @@ for ids, coefs in coef_matrix:
     DIHEDRAL_IDS.append(ids)
     mean_func_coefs.append(coefs)
 
-print(DIHEDRAL_IDS)
-print(mean_func_coefs)
+print("Dihedral ids", DIHEDRAL_IDS)
+print("Mean func coefs", mean_func_coefs)
+
+search_dim = len(DIHEDRAL_IDS)
+
+print("Cur search dim is", search_dim)
 
 amps = np.array([
     np.abs(mean_func_coefs[i][:3]).sum() for i in range(len(mean_func_coefs))
 ])
-print(amps)
 
 potential_func = PotentialFunction(mean_func_coefs)
 
-kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.Matern12(variance=0.3, lengthscales=0.005, active_dims=[0,1]), period=[2*np.pi, 2*np.pi]) + TransformKernel(potential_func, gpflow.kernels.Matern12(variance=0.3, lengthscales=0.005, active_dims=[0, 1]))
+kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)]) + TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
 
-print(kernel)
+kernel.kernels[1].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
+kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
 
-search_space = Box([0., 0.], [2 * np.pi, 2 * np.pi])  # define the search space directly
+search_space = Box([0. for _ in range(search_dim)], [2 * np.pi for _ in range(search_dim)])  # define the search space directly
 
 #Calc normalizing energy
 #in kcal/mol!
 
-NORM_ENERGY = -367398.19960427243
+NORM_ENERGY = calc_energy(MOL_FILE_NAME, dihedrals=[], norm_energy=0.)#-367398.19960427243
 
 print(NORM_ENERGY)
 
 observer = trieste.objectives.utils.mk_observer(func) # defines a observer of our 'func'
 
 # calculating initial points
-num_initial_points = 1
+num_initial_points = 3
 initial_query_points = search_space.sample_sobol(num_initial_points)
 initial_data = observer(initial_query_points)
 
-gpr = gpflow.models.GPR(
+MINIMA = initial_data.query_points.numpy().tolist()
+
+#gpr = gpflow.models.GPR(
+gpr = GPRwithGrads(
     initial_data.astuple(), 
     kernel
 )
 
-print(gpr.parameters)
+#print(gpr.parameters)
 gpflow.set_trainable(gpr.likelihood, False)
 gpflow.set_trainable(gpr.kernel.kernels[0].variance, False)
-
+gpflow.set_trainable(gpr.kernel.kernels[1].period, False)
 model = GaussianProcessRegression(gpr, num_kernel_samples=100)
 
 # Starting Bayesian optimization
@@ -368,59 +553,84 @@ bo = trieste.bayesian_optimizer.BayesianOptimizer(observer, search_space)
 
 print(f"Initital data:\n{initial_data}")
 
-dataset = upd_dataset_from_trj("tests/cur_trj.xyz", None, mean_func_coefs)
+dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", initial_data, mean_func_coefs)
 model.update(dataset)
 model.optimize(dataset)
 
+model_chk = gpflow.utilities.deepcopy(model.model)
+current_minima = tf.reduce_min(dataset.observations).numpy()
+
 print(f"Current dataset after init:\n{dataset}")
 
-rule = EfficientGlobalOptimization(SparseExpectedImprovement(threshold=np.pi/6))
+#left_borders, right_borders = roi_calc(model.model, MINIMA)
+
+rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
+
+#rule = EfficientGlobalOptimization(SparseGradExpectedImprovement(MINIMA, left_borders, right_borders))
+#rule = EfficientGlobalOptimization(ExpectedImprovement())
 
 prev_result = None
 
-f = open("conf_search.log", "w+")
+#f = open("conf_search.log", "w+")
 
-print(dataset, file=f)
+#print(dataset, file=f)
 
 probs = []
 
 steps = 1
-print("Begin opt!", file = f)
+#print("Begin opt!", file = f)
 for _ in range(50):
     print(f"Step number {steps}")
     try:
         result = bo.optimize(1, dataset, model, rule, fit_initial_model = False)
-        print(f"Optimization step {steps} succeed!", file = f)
+        print(f"Optimization step {steps} succeed!")
     except Exception:
-        print("Optimization failed", file = f)
-        print(result.astuple()[1][-1].dataset, file = f)
+        print("Optimization failed")
+        print(result.astuple()[1][-1].dataset)
+    print(f"Dataset before upd: {dataset}")
     dataset = result.try_get_final_dataset()
     model = result.try_get_final_model()
+    print(f"Dataset after upd: {dataset}")
+    print(f"Last asked point was {ASKED_POINTS[-1]}")
+    #print(dataset)
+    
+    with open('acq_vals_log.json', 'w') as file:
+        json.dump(acq_vals_log, file)
 
-    print(dataset)
-    
-    print(f"Dataset size was {len(dataset)}")
-    
+    #print(f"Dataset size was {len(dataset)}")
+    print(f"Eta is {rule._acquisition_function._eta}")    
     dataset = erase_last_from_dataset(dataset, 1)
-    dataset = upd_dataset_from_trj("tests/cur_trj.xyz", dataset, mean_func_coefs)
+    dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset, mean_func_coefs)
     model.update(dataset)
     model.optimize(dataset)
 
-    print(f"Dataset size become {len(dataset)}")
+    print("Updating model checkpoint!")
+    model_chk = gpflow.utilities.deepcopy(model.model)
+    current_minima = rule._acquisition_function._eta.numpy()[0]#tf.reduce_min(dataset.observations).numpy()
+    print("Updated!")
+    #left_borders, right_borders = roi_calc(model.model, MINIMA)
+    
+#    rule._acquisition_function.update_roi(
+#        MINIMA,
+#        left_borders,
+#        right_borders,
+#    )
 
-    print(model.model.parameters)
+    #print(f"Dataset size become {len(dataset)}")
 
-    print(dataset.query_points.numpy(), file = f)
+    #print(model.model.parameters)
 
-    cur_prob = get_max_unknown_prob(model.model, dataset.query_points.numpy(), dataset.observations.numpy(), steps, mean_func_coefs)
-    save_plot(f"probs/plot_{steps}.html", dataset.query_points.numpy(), dataset.observations.numpy())
-    save_acq(f"probs/acq_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy())
+    #print(dataset.query_points.numpy(), file = f)
 
-    print(f"Current prob: {cur_prob}", file = f)
+    #cur_prob = get_max_unknown_prob(model.model, dataset.query_points.numpy(), dataset.observations.numpy(), steps, mean_func_coefs)
+    #save_plot(f"probs/plot_{steps}.html", dataset.query_points.numpy(), dataset.observations.numpy())
+    #save_acq(f"probs/acq_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy())
+    #save_prob(f"probs/prob_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy(), mean_func_coefs)
+    #print(f"Current prob: {cur_prob}", file = f)
     steps += 1
     prev_result = result
     
-    probs.append(cur_prob)
+    #probs.append(cur_prob)
 
 # printing results
 query_points = dataset.query_points.numpy()
@@ -428,14 +638,10 @@ observations = dataset.observations.numpy()
 
 arg_min_idx = tf.squeeze(tf.argmin(observations, axis=0))
 
-print(f"query point: {query_points[arg_min_idx, :]}", file = f)
-print(f"observation: {observations[arg_min_idx, :]}", file = f)
+print(f"query point: {query_points[arg_min_idx, :]}")
+print(f"observation: {observations[arg_min_idx, :]}")
 save_res("tests/res.xyz", *query_points[arg_min_idx, :])
 save_all("tests/all.xyz", query_points)
-
-print(probs, file=f)
-
-f.close()
 
 dbscan_clf = DBSCAN(eps=np.pi/12,
                     min_samples=2,
@@ -448,11 +654,9 @@ for i in range(len(query_points)):
     if observations[i] < res[cluster_id][0]:
         res[cluster_id] = observations[i], i
 
-print(res)
-
 with open("res.dat", "w+") as file:
     file.write(query_points.__str__())
     file.write("\n")
     file.write(observations.__str__())
-save_plot("tests/plot.html", query_points, observations)
-save_prob("tests/prob.html", result.try_get_final_model().model, query_points, observations)
+#save_plot("tests/plot.html", query_points, observations)
+#save_prob("tests/prob.html", result.try_get_final_model().model, query_points, observations)
