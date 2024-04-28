@@ -1,1 +1,7 @@
 mol_file_name : "tests/new_test.mol"
+spin_multiplicity : 1
+charge : 0
+use_orca : True
+orca_exec_command: "/opt/orca5/orca"
+num_of_procs : 4
+orca_method : "r2SCAN-3c TightSCF"

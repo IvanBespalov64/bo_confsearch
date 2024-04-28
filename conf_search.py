@@ -9,6 +9,7 @@ from coef_from_grid import pes, pes_tf, pes_tf_grad
 from calc import calc_energy, load_last_optimized_structure_xyz_block
 from calc import change_dihedrals
 from calc import parse_points_from_trj
+from calc import load_params_from_config
 
 from coef_calc import CoefCalculator
 
@@ -485,6 +486,8 @@ except Exception:
     exit(0)
 
 MOL_FILE_NAME = config['mol_file_name']
+
+load_params_from_config(config)
 
 print("Coef calculator creatring")
 

@@ -12,16 +12,18 @@ from sklearn.cluster import KMeans
 
 import default_vals
 
+from typing import Dict
+
 HARTRI_TO_KCAL = 627.509474063 
 
 USE_ORCA = default_vals.USE_ORCA
 ORCA_EXEC_COMMAND = default_vals.ORCA_EXEC_COMMAND
 GAUSSIAN_EXEC_COMMAND = default_vals.GAUSSIAN_EXEC_COMMAND
-DEFAULT_NUM_OF_PROCS = default_vals.DEFAULT_NUM_OF_PROCS
+NUM_OF_PROCS = default_vals.DEFAULT_NUM_OF_PROCS
 DEFAULT_METHOD = default_vals.DEFAULT_METHOD
-DEFAULT_ORCA_METHOD = default_vals.DEFAULT_ORCA_METHOD
-DEFAULT_CHARGE = default_vals.DEFAULT_CHARGE
-DEFAULT_MULTIPL = default_vals.DEFAULT_MULTIPL
+ORCA_METHOD = default_vals.DEFAULT_ORCA_METHOD
+CHARGE = default_vals.DEFAULT_CHARGE
+MULTIPL = default_vals.DEFAULT_MULTIPL
 
 CURRENT_STRUCTURE_ID = 0 # global id for every structure that we would save
 
@@ -31,6 +33,60 @@ SKIP_TRJ = False
 #Alias for type of node about dihedral angle 
 #that consists of list with four atoms and value of degree
 dihedral = tuple[list[int], float]
+
+def load_params_from_config(
+    config : Dict[str, object]
+) -> None:
+    
+    global USE_ORCA, ORCA_EXEC_COMMAND, NUM_OF_PROCS, ORCA_METHOD, ORCA, CHARGE, MULTIPL
+    
+    print(f"Loading calculation config!")
+    update_number = 0
+    if "spin_multiplicity" in config:
+        if not isinstance(config["spin_multiplicity"], int):
+            print(f"Spin Multiplicity should be integer! Continue with default value {MULTIPL}")
+        else:
+            MULTIPL = config["spin_multiplicity"]
+            update_number += 1
+
+    if "charge" in config:
+        if not isinstance(config["charge"], int):
+            print(f"Charge should be integer! Continue with default value {CHARGE}")
+        else:
+            CHARGE = config["charge"]
+            update_number += 1
+
+    if "use_orca" in config:
+        if not isinstance(config["use_orca"], bool):
+            print(f"use_orca should be bool! Continue with default value {USE_ORCA}")
+        elif not config["use_orca"]:
+            print("Now only orca calculations supported! Continue with use_orca=True")
+        else:
+            USE_ORCA = config["use_orca"]
+            update_number += 1
+    
+    if "orca_exec_command" in config:
+        if not isinstance(config["orca_exec_command"], str):
+            print(f"Orca execution command should be str! Continue with default value {ORCA_EXEC_COMMAND}")
+        else:
+            ORCA_EXEC_COMMAND = config["orca_exec_command"]
+            update_number += 1    
+
+    if "num_of_procs" in config:
+        if not isinstance(config["num_of_procs"], int):
+            print(f"Number of procs should be integer! Continue with default value {NUM_OF_PROCS}")
+        else:
+            NUM_OF_PROCS = config["num_of_procs"]
+            update_number += 1
+
+    if "orca_method" in config:
+        if not isinstance(config["orca_method"], str):
+            print(f"Orca method should be str! Continue with default value {ORCA_METHOD}")
+        else:
+            ORCA_METHOD = config["orca_method"]
+            update_number += 1
+
+    print(f"Calculation config loaded! {update_number} params were updated!")
 
 def dist_between_atoms(mol : Chem.rdchem.Mol, i : int, j : int) -> float:
     pos_i = mol.GetConformer().GetAtomPosition(i)
@@ -118,8 +174,8 @@ def generate_default_gjf(coords : str, gjf_name : str):
     """
         generate .gjf with default properties
     """
-    generate_gjf(coords, gjf_name, DEFAULT_NUM_OF_PROCS, DEFAULT_METHOD,\
-                                         DEFAULT_CHARGE, DEFAULT_MULTIPL)
+    generate_gjf(coords, gjf_name, NUM_OF_PROCS, DEFAULT_METHOD,\
+                                         CHARGE, MULTIPL)
 
 def generate_oinp(
         coords : str, 
@@ -153,8 +209,8 @@ def generate_oinp(
         file.write("END\n")
 
 def generate_default_oinp(coords : str, dihedrals : list[dihedral], oinp_name : str, constrained_opt : bool = False):
-    generate_oinp(coords, dihedrals, oinp_name, DEFAULT_NUM_OF_PROCS, DEFAULT_ORCA_METHOD,\
-                                                DEFAULT_CHARGE, DEFAULT_MULTIPL, constrained_opt=constrained_opt)
+    generate_oinp(coords, dihedrals, oinp_name, NUM_OF_PROCS, ORCA_METHOD,\
+                                                CHARGE, MULTIPL, constrained_opt=constrained_opt)
 def start_calc(gjf_name : str):
     """
         Running calculation
