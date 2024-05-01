@@ -125,7 +125,7 @@ def calc(dihedrals : list[float]) -> float:
     xyz_from_constrained = load_last_optimized_structure_xyz_block(MOL_FILE_NAME)
     print('Loaded!\nFull opt')
     en = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, force_xyz_block=xyz_from_constrained)
-    print(f'Optimized! En = {en}') #TODO: Check what exact energy should we pass to gaussian process. It might be an energy from constrained optimization
+    print(f'Optimized! En = {en}')
 
     return en
 
@@ -598,6 +598,8 @@ for _ in range(50):
     print(f"Dataset after upd: {dataset}")
     print(f"Last asked point was {ASKED_POINTS[-1]}")
     #print(dataset)
+
+    deepest_minima.append(tf.reduce_min(dataset.observations).numpy())    
     
     logs = {
         'acq_vals' : acq_vals_log,
@@ -618,8 +620,6 @@ for _ in range(50):
     model_chk = gpflow.utilities.deepcopy(model.model)
     current_minima = rule._acquisition_function._eta.numpy()[0]#tf.reduce_min(dataset.observations).numpy()
     print("Updated!")
-
-    deepest_minima.append(tf.reduce_min(dataset.observations).numpy())    
 
     #left_borders, right_borders = roi_calc(model.model, MINIMA)
     
