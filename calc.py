@@ -439,12 +439,19 @@ def parse_points_from_trj(
     #print(vals)
     print(f"PARSING POINTS, CLUSTER NUM = {num_of_clusters}")
     if save_structs:
+
         print("SAVING STRUCTS")
+        print(f"Saving first struct from trj. Current structure number: {CURRENT_STRUCTURE_ID}")
+        with open(structures_path + str(CURRENT_STRUCTURE_ID) + ".xyz", "w") as file:
+            file.write(structures[0])
+        print(f"saved")
+        CURRENT_STRUCTURE_ID += 1
+
         for cluster_id in vals:
             print(f"saving struct number {CURRENT_STRUCTURE_ID}")
             with open(structures_path + str(CURRENT_STRUCTURE_ID) + ".xyz", "w") as file:
-                file.write(structures[vals[cluster_id][1]])
-                print("saved")
+                file.write(structures[vals[cluster_id][1] + 1]) # because points parsed from result[1:]
+            print("saved")
             CURRENT_STRUCTURE_ID += 1
     
     return [result[0]] + [(points[vals[cluster_id][1]], vals[cluster_id][0]) for cluster_id in vals], result[-1]
