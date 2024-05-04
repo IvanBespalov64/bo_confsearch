@@ -563,6 +563,8 @@ gpr = GPRwithGrads(
     kernel
 )
 
+model.optimize(dataset)
+
 #print(gpr.parameters)
 gpflow.set_trainable(gpr.likelihood, False)
 gpflow.set_trainable(gpr.kernel.kernels[0].variance, False)
