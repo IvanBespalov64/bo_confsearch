@@ -15,6 +15,8 @@ from coef_calc import CoefCalculator
 
 from db_connector import LocalConnector
 
+from dataclasses import fields
+
 from sparse_ei import SparseExpectedImprovement
 from sparse_grad_based_ei import SparseGradExpectedImprovement
 from explor_imp import ExplorationImprovement
@@ -37,6 +39,8 @@ import sys
 import yaml
 import json
 
+from default_vals import ConfSearchConfig
+
 from trieste.acquisition.function import ExpectedImprovement
 
 from rdkit import Chem
@@ -56,7 +60,7 @@ CUR_ADD_POINTS = []
 
 global_degrees = []
 
-MINIMA = []
+#MINIMA = []
 
 ASKED_POINTS = []
 
@@ -416,8 +420,7 @@ def upd_points(dataset : Dataset, model : gpflow.models.gpr.GPR) -> tuple[Datase
 
 def upd_dataset_from_trj(
     trj_filename : str, 
-    dataset : Dataset,
-    coefs : list
+    dataset : Dataset
 ) -> Dataset:
     """
         Return dataset that consists of old points
@@ -425,7 +428,7 @@ def upd_dataset_from_trj(
     """
     print(f"Input dataset is: {dataset}") 
     parsed_data, last_point = parse_points_from_trj(trj_filename, DIHEDRAL_IDS, NORM_ENERGY, True, 'structs/', True)
-    MINIMA.append(last_point[0]) 
+    #MINIMA.append(last_point[0]) 
     print(f"Parsed data: {parsed_data}")
     degrees, energies = zip(*parsed_data)
     print(f"Degrees: {degrees}\nEnergies: {energies}")
@@ -473,11 +476,11 @@ class PotentialFunction():
 
 print("Reading config.yaml")
 
-config = {}
+raw_config = {}
 
 try:
     with open('config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
+        raw_config = yaml.safe_load(file)
 except FileNotFoundError:
     print("No config.yaml!\nFinishing!")
     exit(0)
@@ -485,15 +488,22 @@ except Exception:
     print("Something went wrong!\nFinishing!")
     exit(0)
 
-MOL_FILE_NAME = config['mol_file_name']
+config = ConfSearchConfig(**raw_config)
 
-load_params_from_config(config)
+MOL_FILE_NAME = config.mol_file_name
+
+print(config)
+
+load_params_from_config({field.name : getattr(config, field.name) for field in fields(config)}) # TODO: rewrite in better way
 
 print("Coef calculator creatring")
 
-coef_matrix = CoefCalculator(Chem.MolFromMolFile(MOL_FILE_NAME), "test_scans/", db_connector=LocalConnector('dihedral_logs.db')).coef_matrix()
-
-exit(0)
+coef_matrix = CoefCalculator(
+    mol=Chem.MolFromMolFile(MOL_FILE_NAME),
+    config=config, 
+    dir_for_inps="test_scans/", 
+    db_connector=LocalConnector('dihedral_logs.db')
+).coef_matrix()
 
 print("Coef calculator created!")
 
@@ -528,20 +538,28 @@ search_space = Box([0. for _ in range(search_dim)], [2 * np.pi for _ in range(se
 
 NORM_ENERGY = calc_energy(MOL_FILE_NAME, dihedrals=[], norm_energy=0.)#-367398.19960427243
 
-print(NORM_ENERGY)
+print(f"Norm energy: (NORM_ENERGY")
 
 observer = trieste.objectives.utils.mk_observer(func) # defines a observer of our 'func'
 
 # calculating initial points
 num_initial_points = 3
-initial_query_points = search_space.sample_sobol(num_initial_points)
-initial_data = observer(initial_query_points)
+dataset = None
 
-MINIMA = initial_data.query_points.numpy().tolist()
+for idx in range(num_initial_points):
+    initial_query_points = search_space.sample_sobol(1)
+    observer(initial_query_points) # noqa
+    dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
+    
+print(f"Initial dataset observed! {num_initial_points} minima observed, total {dataset.query_points.shape[0]} points has been collected!")
+
+#initial_data = observer(initial_query_points)
+
+#MINIMA = initial_data.query_points.numpy().tolist()
 
 #gpr = gpflow.models.GPR(
 gpr = GPRwithGrads(
-    initial_data.astuple(), 
+    dataset.astuple(), 
     kernel
 )
 
@@ -554,16 +572,16 @@ model = GaussianProcessRegression(gpr, num_kernel_samples=100)
 # Starting Bayesian optimization
 bo = trieste.bayesian_optimizer.BayesianOptimizer(observer, search_space)
 
-print(f"Initital data:\n{initial_data}")
+print(f"Initital data:\n{dataset}")
 
-dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", initial_data, mean_func_coefs)
-model.update(dataset)
-model.optimize(dataset)
+#dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", initial_data, mean_func_coefs)
+#model.update(dataset)
+#model.optimize(dataset)
 
 model_chk = gpflow.utilities.deepcopy(model.model)
 current_minima = tf.reduce_min(dataset.observations).numpy()
 
-print(f"Current dataset after init:\n{dataset}")
+#print(f"Current dataset after init:\n{dataset}")
 
 #left_borders, right_borders = roi_calc(model.model, MINIMA)
 
@@ -572,18 +590,14 @@ rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
 #rule = EfficientGlobalOptimization(SparseGradExpectedImprovement(MINIMA, left_borders, right_borders))
 #rule = EfficientGlobalOptimization(ExpectedImprovement())
 
-prev_result = None
-
 #f = open("conf_search.log", "w+")
 
 #print(dataset, file=f)
 
-probs = []
-
 deepest_minima = []
 
 steps = 1
-#print("Begin opt!", file = f)
+
 for _ in range(50):
     print(f"Step number {steps}")
     try:
@@ -592,10 +606,9 @@ for _ in range(50):
     except Exception:
         print("Optimization failed")
         print(result.astuple()[1][-1].dataset)
-    print(f"Dataset before upd: {dataset}")
+    
     dataset = result.try_get_final_dataset()
     model = result.try_get_final_model()
-    print(f"Dataset after upd: {dataset}")
     print(f"Last asked point was {ASKED_POINTS[-1]}")
     #print(dataset)
 
@@ -612,7 +625,7 @@ for _ in range(50):
     #print(f"Dataset size was {len(dataset)}")
     print(f"Eta is {rule._acquisition_function._eta}")    
     dataset = erase_last_from_dataset(dataset, 1)
-    dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset, mean_func_coefs)
+    dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
     model.update(dataset)
     model.optimize(dataset)
 
@@ -620,6 +633,8 @@ for _ in range(50):
     model_chk = gpflow.utilities.deepcopy(model.model)
     current_minima = rule._acquisition_function._eta.numpy()[0]#tf.reduce_min(dataset.observations).numpy()
     print("Updated!")
+
+    print(f"Step {steps} complited! Current dataset is:\n{dataset}")
 
     #left_borders, right_borders = roi_calc(model.model, MINIMA)
     
@@ -641,7 +656,6 @@ for _ in range(50):
     #save_prob(f"probs/prob_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy(), mean_func_coefs)
     #print(f"Current prob: {cur_prob}", file = f)
     steps += 1
-    prev_result = result
     
     #probs.append(cur_prob)
 
@@ -649,12 +663,12 @@ for _ in range(50):
 query_points = dataset.query_points.numpy()
 observations = dataset.observations.numpy()
 
-arg_min_idx = tf.squeeze(tf.argmin(observations, axis=0))
+#arg_min_idx = tf.squeeze(tf.argmin(observations, axis=0))
 
 print(f"query point: {query_points[arg_min_idx, :]}")
 print(f"observation: {observations[arg_min_idx, :]}")
-save_res("tests/res.xyz", *query_points[arg_min_idx, :])
-save_all("tests/all.xyz", query_points)
+#save_res("tests/res.xyz", *query_points[arg_min_idx, :])
+#save_all("tests/all.xyz", query_points)
 
 dbscan_clf = DBSCAN(eps=np.pi/12,
                     min_samples=2,

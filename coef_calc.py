@@ -5,7 +5,7 @@ from rdkit.Chem.rdMolTransforms import SetDihedralRad
 import numpy as np
 import gpflow
 
-import default_vals
+from default_vals import ConfSearchConfig
 import calc
 
 from mean_cos import BaseCos
@@ -25,12 +25,9 @@ class CoefCalculator:
 
     def __init__(self,
                  mol : Chem.rdchem.Mol,
+                 config : ConfSearchConfig,
                  dir_for_inps : str="",
                  skip_triple_equal_terminal_atoms=True,
-                 num_of_procs : int = default_vals.DEFAULT_NUM_OF_PROCS,
-                 method_of_calc : str = default_vals.DEFAULT_ORCA_METHOD,
-                 charge : int = default_vals.DEFAULT_CHARGE,
-                 multipl : int = default_vals.DEFAULT_MULTIPL,
                  degrees : np.ndarray = np.linspace(0, 2 * np.pi, 37).reshape(37, 1),
                  db_connector : Union[Connector, None] = None):
         """
@@ -48,10 +45,10 @@ class CoefCalculator:
         self.mol = mol
         self.dir_for_inps = dir_for_inps if dir_for_inps[-1] == "/" else dir_for_inps + "/"
         self.skip_triple_equal_terminal_atoms = skip_triple_equal_terminal_atoms
-        self.num_of_procs = num_of_procs
-        self.method_of_calc = method_of_calc
-        self.charge = charge
-        self.multipl = multipl
+        self.num_of_procs = config.num_of_procs
+        self.method_of_calc = config.orca_method
+        self.charge = config.charge
+        self.multipl = config.spin_multiplicity
         self.degrees = degrees
 
         # Key is SMILES, val is idx
@@ -367,7 +364,7 @@ class CoefCalculator:
         inp_files = self.generate_scan_inps_from_mol()
         for cur in inp_files:
             if not (self.scanfile2smiles[cur] in self.fetched_coefs):
-                calc.start_calc(cur)    
+               calc.start_calc(cur)    
         return self.get_energies_from_scans(inp_files)
 
     def calc(self) -> list[list[float]]:

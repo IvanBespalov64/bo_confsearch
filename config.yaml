@@ -1,7 +1,7 @@
-mol_file_name : "tests/new_test.mol"
+mol_file_name : "tests/cur.mol"
 spin_multiplicity : 1
 charge : 0
 use_orca : True
 orca_exec_command: "/opt/orca5/orca"
-num_of_procs : 4
-orca_method : "r2SCAN-3c TightSCF"
+num_of_procs : 8
+orca_method : "lda sto-3g"

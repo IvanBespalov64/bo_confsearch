@@ -10,20 +10,21 @@ import numpy as np
 
 from sklearn.cluster import KMeans
 
-import default_vals
+from default_vals import ConfSearchConfig
 
 from typing import Dict
 
 HARTRI_TO_KCAL = 627.509474063 
 
-USE_ORCA = default_vals.USE_ORCA
-ORCA_EXEC_COMMAND = default_vals.ORCA_EXEC_COMMAND
-GAUSSIAN_EXEC_COMMAND = default_vals.GAUSSIAN_EXEC_COMMAND
-NUM_OF_PROCS = default_vals.DEFAULT_NUM_OF_PROCS
-DEFAULT_METHOD = default_vals.DEFAULT_METHOD
-ORCA_METHOD = default_vals.DEFAULT_ORCA_METHOD
-CHARGE = default_vals.DEFAULT_CHARGE
-MULTIPL = default_vals.DEFAULT_MULTIPL
+USE_ORCA = ConfSearchConfig.use_orca
+ORCA_EXEC_COMMAND = ConfSearchConfig.orca_exec_command
+GAUSSIAN_EXEC_COMMAND = None
+NUM_OF_PROCS = ConfSearchConfig.num_of_procs
+DEFAULT_METHOD = None
+ORCA_METHOD = ConfSearchConfig.orca_method
+CHARGE = ConfSearchConfig.charge
+MULTIPL = ConfSearchConfig.spin_multiplicity
+TS = ConfSearchConfig.ts
 
 CURRENT_STRUCTURE_ID = 0 # global id for every structure that we would save
 
@@ -84,6 +85,13 @@ def load_params_from_config(
             print(f"Orca method should be str! Continue with default value {ORCA_METHOD}")
         else:
             ORCA_METHOD = config["orca_method"]
+            update_number += 1
+    
+    if "ts" in config:
+        if not isinstance(config["ts"], bool):
+            print(f"TS key should be bool! Continue with default value {TS}")
+        else:
+            TS = config["ts"]
             update_number += 1
 
     print(f"Calculation config loaded! {update_number} params were updated!")
@@ -192,7 +200,7 @@ def generate_oinp(
     """
     with open(gjf_name, 'w+') as file:
         opt_cmd = "opt"
-        if default_vals.ts:
+        if TS:
             opt_cmd = "OptTS"
         file.write("!" + method_of_calc + f" {opt_cmd}\n")
         file.write("%pal\nnprocs " + str(num_of_procs) + "\nend\n")

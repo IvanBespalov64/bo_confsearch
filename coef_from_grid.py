@@ -42,6 +42,5 @@ def calc_coefs(
         returns [7, inp_dims] array of coefs
     """ 
     y = (y - y.mean()) * HARTRI_TO_KCAL
-
-    coefs, cov_matrix = curve_fit(pes, x, y, p0=np.ones(7))
+    coefs, cov_matrix = curve_fit(pes, x, y, p0=np.ones(7), maxfev=10000)
     return coefs
