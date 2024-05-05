@@ -10,6 +10,11 @@ class ConfSearchConfig:
     num_of_procs : int = 8
     orca_method : str = "lda sto-3g"
     ts : bool = False
+    rolling_window_size : int = 5
+    rolling_std_threshold : float = 0.15
+    rolling_mean_threshold : float = 1.
+    num_initial_points : int = 3
+    max_steps : int = 50
     
 #USE_ORCA=True
 #ORCA_EXEC_COMMAND = "/opt/orca5/orca"

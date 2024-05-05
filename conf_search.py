@@ -492,7 +492,7 @@ config = ConfSearchConfig(**raw_config)
 
 MOL_FILE_NAME = config.mol_file_name
 
-print(config)
+print(f"Performing conf. search with config: {config}")
 
 load_params_from_config({field.name : getattr(config, field.name) for field in fields(config)}) # TODO: rewrite in better way
 
@@ -543,15 +543,14 @@ print(f"Norm energy: (NORM_ENERGY")
 observer = trieste.objectives.utils.mk_observer(func) # defines a observer of our 'func'
 
 # calculating initial points
-num_initial_points = 3
 dataset = None
 
-for idx in range(num_initial_points):
+for idx in range(config.num_initial_points):
     initial_query_points = search_space.sample_sobol(1)
     observer(initial_query_points) # noqa
     dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
     
-print(f"Initial dataset observed! {num_initial_points} minima observed, total {dataset.query_points.shape[0]} points has been collected!")
+print(f"Initial dataset observed! {config.num_initial_points} minima observed, total {dataset.query_points.shape[0]} points has been collected!")
 
 #initial_data = observer(initial_query_points)
 
@@ -598,13 +597,15 @@ rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
 
 deepest_minima = []
 
-steps = 1
+early_termination_flag = False
 
-for _ in range(50):
-    print(f"Step number {steps}")
+for step in range(1, config.max_steps+1):
+
+    print(f"Step number {step}")
+
     try:
         result = bo.optimize(1, dataset, model, rule, fit_initial_model = False)
-        print(f"Optimization step {steps} succeed!")
+        print(f"Optimization step {step} succeed!")
     except Exception:
         print("Optimization failed")
         print(result.astuple()[1][-1].dataset)
@@ -612,7 +613,6 @@ for _ in range(50):
     dataset = result.try_get_final_dataset()
     model = result.try_get_final_model()
     print(f"Last asked point was {ASKED_POINTS[-1]}")
-    #print(dataset)
 
     deepest_minima.append(tf.reduce_min(dataset.observations).numpy())    
     
@@ -625,7 +625,9 @@ for _ in range(50):
         json.dump(logs, file)
 
     #print(f"Dataset size was {len(dataset)}")
+
     print(f"Eta is {rule._acquisition_function._eta}")    
+
     dataset = erase_last_from_dataset(dataset, 1)
     dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
     model.update(dataset)
@@ -636,7 +638,21 @@ for _ in range(50):
     current_minima = rule._acquisition_function._eta.numpy()[0]#tf.reduce_min(dataset.observations).numpy()
     print("Updated!")
 
-    print(f"Step {steps} complited! Current dataset is:\n{dataset}")
+    print(f"Step {step} complited! Current dataset is:\n{dataset}")
+
+    print(f"Checking termination criterion!")
+    print(f"Acq vals in window: {logs['acq_vals'][max(0, step-config.rolling_window_size):step]}")
+     
+    rolling_mean = np.mean(logs['acq_vals'][max(0, step-config.rolling_window_size):step])
+    rolling_std = np.std(logs['acq_vals'][max(0, step-config.rolling_window_size):step])
+
+    print(f"After step {step}:")
+    print(f"Current rolling mean of acqusition function maximum is: {rolling_mean}, threshold is {config.rolling_mean_threshold}")
+    print(f"Current rolling std of acqusition function maximum is: {rolling_std}, threshold is {config.rolling_std_threshold}")
+    if step >= config.rolling_window_size and rolling_std < config.rolling_std_threshold and rolling_mean < config.rolling_mean_threshold:
+        print(f"Termination criterion reached on step {step}! Terminating search!")
+        early_termination_flag = True
+        break
 
     #left_borders, right_borders = roi_calc(model.model, MINIMA)
     
@@ -657,20 +673,15 @@ for _ in range(50):
     #save_acq(f"probs/acq_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy())
     #save_prob(f"probs/prob_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy(), mean_func_coefs)
     #print(f"Current prob: {cur_prob}", file = f)
-    steps += 1
     
     #probs.append(cur_prob)
+
+if not early_termination_flag:
+    print("Max number of steps has been reached!")
 
 # printing results
 query_points = dataset.query_points.numpy()
 observations = dataset.observations.numpy()
-
-#arg_min_idx = tf.squeeze(tf.argmin(observations, axis=0))
-
-print(f"query point: {query_points[arg_min_idx, :]}")
-print(f"observation: {observations[arg_min_idx, :]}")
-#save_res("tests/res.xyz", *query_points[arg_min_idx, :])
-#save_all("tests/all.xyz", query_points)
 
 dbscan_clf = DBSCAN(eps=np.pi/12,
                     min_samples=2,
@@ -687,5 +698,3 @@ with open("res.dat", "w+") as file:
     file.write(query_points.__str__())
     file.write("\n")
     file.write(observations.__str__())
-#save_plot("tests/plot.html", query_points, observations)
-#save_prob("tests/prob.html", result.try_get_final_model().model, query_points, observations)

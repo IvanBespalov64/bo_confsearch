@@ -427,7 +427,7 @@ def parse_points_from_trj(
     print(f"Points in trj: {len(result)}")
     #print(result)
    
-    num_of_clusters = min(4, len(points))
+    num_of_clusters = min(3, len(points))
     print(f"Num of clusters: {num_of_clusters}")
 
     vals = {cluster_id : (1e9, -1) for cluster_id in range(num_of_clusters)}
