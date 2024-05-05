@@ -563,8 +563,6 @@ gpr = GPRwithGrads(
     kernel
 )
 
-model.optimize(dataset)
-
 #print(gpr.parameters)
 gpflow.set_trainable(gpr.likelihood, False)
 gpflow.set_trainable(gpr.kernel.kernels[0].variance, False)
@@ -579,6 +577,8 @@ print(f"Initital data:\n{dataset}")
 #dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", initial_data, mean_func_coefs)
 #model.update(dataset)
 #model.optimize(dataset)
+
+model.optimize(dataset)
 
 model_chk = gpflow.utilities.deepcopy(model.model)
 current_minima = tf.reduce_min(dataset.observations).numpy()
