@@ -639,7 +639,10 @@ for step in range(1, config.max_steps+1):
     print("Updated!")
 
     print(f"Step {step} complited! Current dataset is:\n{dataset}")
-
+    
+    if step == 1:
+        continue
+    
     print(f"Checking termination criterion!")
     print(f"Acq vals in window: {logs['acq_vals'][max(0, step-config.rolling_window_size):step]}")
      
@@ -687,14 +690,21 @@ dbscan_clf = DBSCAN(eps=np.pi/12,
                     min_samples=2,
                     metric=max_comp_dist).fit(query_points)
 
-res = {label : (1e9, -1) for label in np.unique(dbscan_clf.labels_)}
+res = {int(label) : (1e9, -1) for label in np.unique(dbscan_clf.labels_)}
 
 for i in range(len(query_points)):
     cluster_id = dbscan_clf.labels_[i]
     if observations[i] < res[cluster_id][0]:
-        res[cluster_id] = observations[i], i
+        res[cluster_id] = observations[i].tolist(), i
 
-with open("res.dat", "w+") as file:
-    file.write(query_points.__str__())
-    file.write("\n")
-    file.write(observations.__str__())
+print(f"Results of clustering: {res}\nThere are relative energy and number of structure for each cluster. Saved in `clustering_results.json`")
+json.dump(res, open('clustering_results.json', 'w'))
+
+print("Saving full dataset at `all_points.json`")
+json.dump(
+    {
+        'query_points' : query_points.tolist(),
+        'observations' : observations.tolist()
+    },
+    open('all_points.json', 'w')
+)

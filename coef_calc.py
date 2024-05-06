@@ -3,7 +3,6 @@ from rdkit.Chem import AllChem
 from rdkit.Chem.rdMolTransforms import SetDihedralRad
 
 import numpy as np
-import gpflow
 
 from default_vals import ConfSearchConfig
 import calc
