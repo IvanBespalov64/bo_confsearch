@@ -24,13 +24,16 @@ class CoefCalculator:
         Calculating coefs for mean function for GPRegressor
     """
 
-    def __init__(self,
-                 mol : Chem.rdchem.Mol,
-                 config : ConfSearchConfig,
-                 dir_for_inps : str="",
-                 skip_triple_equal_terminal_atoms=True,
-                 degrees : np.ndarray = np.linspace(0, 2 * np.pi, 37).reshape(37, 1),
-                 db_connector : Union[Connector, None] = None):
+    def __init__(
+        self,
+        mol : Chem.rdchem.Mol,
+        config : ConfSearchConfig,
+        dir_for_inps : str="",
+        skip_triple_equal_terminal_atoms=True,
+        aromatic_to_aliphatic : bool = True,         
+        degrees : np.ndarray = np.linspace(0, 2 * np.pi, 37).reshape(37, 1),
+        db_connector : Union[Connector, None] = None
+    ) -> None:
         """
             mol - rdkit molecule
             dir_for_inps - path to directory, where scan .inp files will generates
@@ -58,6 +61,13 @@ class CoefCalculator:
         self.frags = {}
 
         self.db_connector = db_connector
+        self.aromatic_to_aliphatic = aromatic_to_aliphatic
+
+        self.case_sensetive_atoms = [
+            cur for cur in [
+                Chem.PeriodicTable.GetElementSymbol(Chem.GetPeriodicTable(), idx) for idx in range(1, 119)
+            ] if cur.upper() != cur
+        ]
 
         self.scanfile2smiles = {} # k - scan_file, v - smiles
         self.fetched_coefs = {} # k - smiles, v - coefs
@@ -100,13 +110,16 @@ class CoefCalculator:
         neighbor_atoms = [cur.GetSymbol() for cur in atom.GetNeighbors()]
         neighbor_atoms.remove(self.get_second_atom_in_bond(in_bond, atom).GetSymbol())
 
+        neighbor_bonds = [cur.GetBondType() for cur in atom.GetBonds()]
+        neighbor_bonds.remove(in_bond.GetBondType())
+
         terminal_neighbors = False
 
         # 3 terminal neighbors
         if sum([self.is_terminal(cur) for cur in atom.GetNeighbors()]) == 3:
             terminal_neighbors = True
 
-        if(terminal_neighbors and len(neighbor_atoms) == 3 and len(set(neighbor_atoms)) == 1):
+        if(terminal_neighbors and len(neighbor_atoms) == 3 and len(set(neighbor_atoms)) == 1 and len(set(neighbor_bonds)) == 1):
             return True
 
         return False
@@ -127,6 +140,9 @@ class CoefCalculator:
 
         # If bond isn't single
         if bond.GetBondType() != Chem.BondType.SINGLE:
+            return False
+
+        if bond.IsInRing():
             return False
 
         if not self.skip_triple_equal_terminal_atoms:
@@ -199,6 +215,33 @@ class CoefCalculator:
                     bond.GetEndAtomIdx(),
                     [cur.GetIdx() for cur in bond.GetEndAtom().GetNeighbors() if cur.GetIdx() != bond.GetBeginAtomIdx()][0])
 
+    def convert_all_aromatic_to_aliphatic(
+        self,
+        cur_smiles : str
+    ) -> str:
+        """
+            Converts all aromatic atoms in SMILES to aliphatic
+        """
+        tmp_smiles = cur_smiles
+        for case_sensetive_atom in self.case_sensetive_atoms:
+            if case_sensetive_atom in tmp_smiles:
+                tmp_smiles = tmp_smiles.replace(case_sensetive_atom, f"<{case_sensetive_atom}>")
+        counter = 0
+        result = ""
+        for cur in tmp_smiles:
+            if cur == '<':
+                counter += 1
+            if cur == '>':
+                counter -= 1
+            if counter == 0 and cur.islower():
+                result += cur.upper()
+            else:
+                result += cur
+        for case_sensetive_atom in self.case_sensetive_atoms:
+            if case_sensetive_atom in result:
+                result = result.replace(f"<{case_sensetive_atom}>", case_sensetive_atom)
+        return result
+
     def get_interesting_frags(self) -> list[Chem.rdchem.Mol]:
         """
             returns a list of simple molecules with one
@@ -226,12 +269,44 @@ class CoefCalculator:
                self.is_triple_eq_neighbors(atom):
                 atoms_to_use.update([cur.GetIdx() for cur in atom.GetNeighbors()])
 
-            rotable_frags.append(Chem.MolFromSmiles(
-                Chem.rdmolfiles.MolFragmentToSmiles(self.mol, atomsToUse = list(atoms_to_use))))
+            rotable_frag_smiles = Chem.rdmolfiles.MolFragmentToSmiles(self.mol, atomsToUse = list(atoms_to_use))
 
-            query_result = self.mol.GetSubstructMatches(Chem.MolFromSmiles(
-                                                        Chem.rdmolfiles.MolFragmentToSmiles(rotable_frags[-1],
-                                                                                            atomsToUse = self.get_idxs_to_rotate(rotable_frags[-1]))))
+            if not Chem.MolFromSmiles(rotable_frag_smiles):
+                if self.aromatic_to_aliphatic:
+                    rotable_frag_smiles = self.convert_all_aromatic_to_aliphatic(rotable_frag_smiles)
+                else:
+                    continue
+            
+            # Looks like shit, but works... I should rewrite it
+
+            rotable_frag_mol = Chem.MolFromSmiles(rotable_frag_smiles)
+            
+            while True:
+                found_radical_electrons = False
+                for atom in rotable_frag_mol.GetAtoms():
+                    found_radical_electrons |= atom.GetNumRadicalElectrons()
+                    atom.SetNumExplicitHs(atom.GetNumExplicitHs()+atom.GetNumRadicalElectrons())
+                rotable_frag_mol = Chem.MolFromSmiles(Chem.MolToSmiles(rotable_frag_mol))
+                if not found_radical_electrons:
+                    break
+                
+            rotable_frag_smiles = Chem.MolToSmiles(Chem.RemoveAllHs(rotable_frag_mol))
+
+            rotable_frags.append(
+                Chem.MolFromSmiles(
+                    rotable_frag_smiles
+                )
+            )
+
+            query_result = self.mol.GetSubstructMatches(
+                Chem.MolFromSmiles(
+                    Chem.rdmolfiles.MolFragmentToSmiles(
+                        rotable_frags[-1],
+                        atomsToUse=self.get_idxs_to_rotate(rotable_frags[-1])
+                    )
+                )
+            )
+
             old_idxs = ()
 
             for res in query_result:
@@ -312,7 +387,7 @@ class CoefCalculator:
             db_response = self.db_connector.get_request(
                 select_request.format(
                     smiles=cur_mol_smiles,
-                    method=self.method_of_calc
+                    method=self.method_of_calc.lower()
                 )
             )
             if len(db_response) > 0:
@@ -394,7 +469,7 @@ class CoefCalculator:
             self.db_connector.set_request(
                 insert_request_template.format(**{
                     'smiles' : self.scanfile2smiles[inp_filename],
-                    'method' : self.method_of_calc,
+                    'method' : self.method_of_calc.lower(),
                     'a1' : coefs[0],
                     'a2' : coefs[1],
                     'a3' : coefs[2],
