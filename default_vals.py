@@ -14,7 +14,9 @@ class ConfSearchConfig:
     rolling_std_threshold : float = 0.15
     rolling_mean_threshold : float = 1.
     num_initial_points : int = 3
-    max_steps : int = 50
+    max_steps : int = 50,
+    xyz_path : str = ""
+    exp_name : str = "cs"
     
 #USE_ORCA=True
 #ORCA_EXEC_COMMAND = "/opt/orca5/orca"

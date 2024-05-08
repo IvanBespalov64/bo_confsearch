@@ -12,6 +12,8 @@ from coef_from_grid import calc_coefs
 
 from db_connector import Connector
 
+import os
+
 from typing import Union
 
 class CoefCalculator:
@@ -59,6 +61,9 @@ class CoefCalculator:
 
         self.scanfile2smiles = {} # k - scan_file, v - smiles
         self.fetched_coefs = {} # k - smiles, v - coefs
+
+        if not os.path.exists(self.dir_for_inps):
+            os.makedirs(self.dir_for_inps)
 
     def is_terminal(self,
                     atom : Chem.rdchem.Atom) -> bool:

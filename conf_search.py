@@ -50,9 +50,8 @@ from sklearn.cluster import DBSCAN
 from tensorflow.python.ops.numpy_ops import np_config
 np_config.enable_numpy_behavior()
 
-MOL_FILE_NAME = None# "tests/cur.mol"
+MOL_FILE_NAME = None
 NORM_ENERGY = 0.
-#RANDOM_DISPLACEMENT = True
 
 DIHEDRAL_IDS = []
 
@@ -60,7 +59,8 @@ CUR_ADD_POINTS = []
 
 global_degrees = []
 
-#MINIMA = []
+structures_path = ""
+exp_name = ""
 
 ASKED_POINTS = []
 
@@ -427,7 +427,15 @@ def upd_dataset_from_trj(
         add points from trj
     """
     print(f"Input dataset is: {dataset}") 
-    parsed_data, last_point = parse_points_from_trj(trj_filename, DIHEDRAL_IDS, NORM_ENERGY, True, 'structs/', True)
+    parsed_data, last_point = parse_points_from_trj(
+        trj_file_name=trj_filename, 
+        dihedrals=DIHEDRAL_IDS, 
+        norm_en=NORM_ENERGY, 
+        save_structs=True, 
+        structures_path=structures_path, 
+        return_minima=True,
+        exp_name=exp_name
+    )
     #MINIMA.append(last_point[0]) 
     print(f"Parsed data: {parsed_data}")
     degrees, energies = zip(*parsed_data)
@@ -491,6 +499,8 @@ except Exception:
 config = ConfSearchConfig(**raw_config)
 
 MOL_FILE_NAME = config.mol_file_name
+structures_path = config.xyz_path
+exp_name = config.exp_name
 
 print(f"Performing conf. search with config: {config}")
 
@@ -501,7 +511,7 @@ print("Coef calculator creatring")
 coef_matrix = CoefCalculator(
     mol=Chem.MolFromMolFile(MOL_FILE_NAME),
     config=config, 
-    dir_for_inps="test_scans/", 
+    dir_for_inps=f"{exp_name}_scans/", 
     db_connector=LocalConnector('dihedral_logs.db')
 ).coef_matrix()
 
@@ -621,7 +631,7 @@ for step in range(1, config.max_steps+1):
         'deepest_minima' : deepest_minima
     }
 
-    with open('logs.json', 'w') as file:
+    with open(f"{exp_name}_logs.json", 'w') as file:
         json.dump(logs, file)
 
     #print(f"Dataset size was {len(dataset)}")
@@ -697,14 +707,14 @@ for i in range(len(query_points)):
     if observations[i] < res[cluster_id][0]:
         res[cluster_id] = observations[i].tolist(), i
 
-print(f"Results of clustering: {res}\nThere are relative energy and number of structure for each cluster. Saved in `clustering_results.json`")
-json.dump(res, open('clustering_results.json', 'w'))
+print(f"Results of clustering: {res}\nThere are relative energy and number of structure for each cluster. Saved in `{exp_name}_clustering_results.json`")
+json.dump(res, open(f'{exp_name}_clustering_results.json', 'w'))
 
-print("Saving full dataset at `all_points.json`")
+print(f"Saving full dataset at `{exp_name}_all_points.json`")
 json.dump(
     {
         'query_points' : query_points.tolist(),
         'observations' : observations.tolist()
     },
-    open('all_points.json', 'w')
+    open(f'{exp_name}_all_points.json', 'w')
 )

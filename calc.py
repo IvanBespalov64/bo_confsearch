@@ -384,7 +384,8 @@ def parse_points_from_trj(
     norm_en : float, 
     save_structs : bool = True,
     structures_path : str = "structs/", 
-    return_minima : bool = True
+    return_minima : bool = True,
+    exp_name : str = "cs"
 ) -> Union[list[tuple[list[dihedral], float]], tuple[list[tuple[list[dihedral], float]], tuple[list[dihedral], float]]]:
     """
         Parse more points from trj orca file
@@ -450,7 +451,7 @@ def parse_points_from_trj(
 
         print("SAVING STRUCTS")
         print(f"Saving first struct from trj. Current structure number: {CURRENT_STRUCTURE_ID}")
-        with open(structures_path + str(CURRENT_STRUCTURE_ID) + ".xyz", "w") as file:
+        with open(structures_path + exp_name + str(CURRENT_STRUCTURE_ID) + ".xyz", "w") as file:
             file.write(structures[0])
         print(f"saved")
         CURRENT_STRUCTURE_ID += 1
