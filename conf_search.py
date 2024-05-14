@@ -36,6 +36,7 @@ from mean_cos import BaseCos, BaseCosMod
 import plotly.graph_objects as go
 from scipy.special import erf
 import sys
+import os
 import yaml
 import json
 
@@ -434,7 +435,6 @@ def upd_dataset_from_trj(
         save_structs=True, 
         structures_path=structures_path, 
         return_minima=True,
-        exp_name=exp_name
     )
     #MINIMA.append(last_point[0]) 
     print(f"Parsed data: {parsed_data}")
@@ -499,8 +499,11 @@ except Exception:
 config = ConfSearchConfig(**raw_config)
 
 MOL_FILE_NAME = config.mol_file_name
-structures_path = config.xyz_path
+structures_path = config.exp_name + "/"
 exp_name = config.exp_name
+
+if not os.path.exists(structures_path):
+    os.makedirs(structures_path)
 
 print(f"Performing conf. search with config: {config}")
 

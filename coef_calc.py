@@ -336,10 +336,13 @@ class CoefCalculator:
 
         return list(map(Chem.MolToXYZBlock, lst))
 
-    def generate_scan_inp(self,
-                          xyz : str,
-                          idxs_to_rotate : list[int],
-                          filename : str):
+    def generate_scan_inp(
+        self,
+        xyz : str,
+        idxs_to_rotate : list[int],
+        filename : str,
+        submol_charge : int
+    ) -> None:
         """
             Generates .inp file with "filename" for scan
             of mol, described by "xyz" xyz block, in orca
@@ -352,7 +355,7 @@ class CoefCalculator:
             file.write("%geom Scan\n")
             file.write("D " + " ".join(list(map(str, idxs_to_rotate))) + " = 0.0, 360.0, 37\n")
             file.write("end\nend\n")
-            file.write("* xyz " + str(self.charge) + " " + str(self.multipl) + "\n")
+            file.write("* xyz " + str(submol_charge) + " " + str(self.multipl) + "\n")
             file.write(xyz)
             file.write("END\n")
 
@@ -399,7 +402,12 @@ class CoefCalculator:
             xyz = Chem.MolToXYZBlock(cur_mol)
             idxs_to_rotate = self.get_idxs_to_rotate(cur_mol)
             filename = self.dir_for_inps + "scan_" + str(angle_number) + ".inp"
-            self.generate_scan_inp(self.get_coords_from_xyz_block(xyz), idxs_to_rotate, filename)
+            self.generate_scan_inp(
+                xyz=self.get_coords_from_xyz_block(xyz), 
+                idxs_to_rotate=idxs_to_rotate, 
+                filename=filename,
+                submol_charge=Chem.GetFormalCharge(cur_mol)
+            )
             inp_names.append(filename)
             angle_number += 1
             self.scanfile2smiles[filename] = cur_mol_smiles
