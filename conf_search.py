@@ -653,7 +653,7 @@ for step in range(1, config.max_steps+1):
 
     print(f"Step {step} complited! Current dataset is:\n{dataset}")
     
-    if step == 1:
+    if step < config.rolling_window_size:
         continue
     
     print(f"Checking termination criterion!")
