@@ -548,10 +548,10 @@ amps = np.array([
 
 potential_func = PotentialFunction(mean_func_coefs)
 
-kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)])# + TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
+kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)]) + TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
 
 kernel.kernels[1].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
-#kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
+kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
 
 search_space = Box([0. for _ in range(search_dim)], [2 * np.pi for _ in range(search_dim)])  # define the search space directly
 
@@ -613,9 +613,9 @@ current_minima = tf.reduce_min(dataset.observations).numpy()
 #left_borders, right_borders = roi_calc(model.model, MINIMA)
 
 #This should be used!
-#####rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
+rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
 
-rule = EfficientGlobalOptimization(ExpectedImprovement())
+#rule = EfficientGlobalOptimization(ExpectedImprovement())
 
 #rule = EfficientGlobalOptimization(SparseGradExpectedImprovement(MINIMA, left_borders, right_borders))
 #rule = EfficientGlobalOptimization(ExpectedImprovement())
