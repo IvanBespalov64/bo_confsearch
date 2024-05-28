@@ -25,7 +25,8 @@ ORCA_METHOD = ConfSearchConfig.orca_method
 CHARGE = ConfSearchConfig.charge
 MULTIPL = ConfSearchConfig.spin_multiplicity
 TS = ConfSearchConfig.ts
-
+BROKEN_STRUCT_ENERGY = ConfSearchConfig.broken_struct_energy
+BOND_LENGTH_THRESHOLD = ConfSearchConfig.bond_length_threshold
 CURRENT_STRUCTURE_ID = 0 # global id for every structure that we would save
 
 WRONG_GEOMETRY = False
@@ -92,6 +93,20 @@ def load_params_from_config(
             print(f"TS key should be bool! Continue with default value {TS}")
         else:
             TS = config["ts"]
+            update_number += 1
+
+    if "broken_struct_energy" in config:
+        if not isinstance(config["broken_struct_energy"], float):
+            print(f"Broken structure Energy should be float! Continue with default value {BROKEN_STRUCT_ENERGY}")
+        else:
+            BROKEN_STRUCT_ENERGY = config["broken_struct_energy"]
+            update_number += 1
+
+    if "bond_length_threshold" in config:
+        if not isinstance(config["bond_length_threshold"], float):
+            print(f"Bond length threshold should be float! Continue with default value {BOND_LENGTH_THRESHOLD}")
+        else:
+            BOND_LENGTH_THRESHOLD = config["bond_length_threshold"]
             update_number += 1
 
     print(f"Calculation config loaded! {update_number} params were updated!")
@@ -277,19 +292,50 @@ def wait_for_the_end_of_calc(log_name : str, timeout):
         finally:
             time.sleep(timeout / 1000)
 
-def find_energy_in_log(log_name : str) -> float:
+def find_energy_in_log(log_name : str) -> tuple[float, bool]:
     """
         finds energy of structure in log file
     """
-    with open(log_name, 'r') as file:
-        if not USE_ORCA:
-            en_line = [line for line in file if "SCF Done" in line][0]
-            en = float(en_line.split()[4])
-        else:
-            en_line = [line for line in file if "FINAL SINGLE POINT ENERGY" in line][-1]
-            en = float(en_line.split()[4])
-        return en
-    
+    try:
+        with open(log_name, 'r') as file:
+            if not USE_ORCA:
+                en_line = [line for line in file if "SCF Done" in line][0]
+                en = float(en_line.split()[4])
+            else:
+                en_line = [line for line in file if "FINAL SINGLE POINT ENERGY" in line][-1]
+                en = float(en_line.split()[4])
+            return en, True
+    except FileNotFoundError:
+        print(f"No log file! Something went wrong! Finishing!")
+        exit(0) #TODO: Make hooks for finishing
+    except IndexError:
+        print(f"Seems that optimization finished with error! Check it carefuly by yourself! Returning default energy for broken structures: {BROKEN_STRUCT_ENERGY}")
+        return BROKEN_STRUCT_ENERGY, False #TODO: find better way to handle errors in orca
+
+def check_is_broken(
+    xyz_block : str,
+    len_threshold : float = BOND_LENGTH_THRESHOLD
+) -> bool:
+    coord_matrix = np.asarray(
+        list(
+            map(
+                lambda s: list(
+                    map(
+                        float, 
+                        s.split()[1:]
+                    )
+                ),
+                xyz_block.strip().split('\n')
+            )
+        )
+    )
+    for i in range(coord_matrix.shape[0]):
+        for j in range(i+1, coord_matrix.shape[1]):
+            #print(np.linalg.norm(coord_matrix[i, :] - coord_matrix[j, :]))
+            if np.linalg.norm(coord_matrix[i, :] - coord_matrix[j, :]) <= len_threshold:
+                return True
+    return False
+ 
 def calc_energy(
         mol_file_name : str,
         dihedrals : list[dihedral] = [],
@@ -305,8 +351,8 @@ def calc_energy(
         Also displace atoms on random distances is RANDOM_DISPLACEMENT = True
     """
 
-    global WRONG_GEOMETRY
-    global SKIP_TRJ
+    #global WRONG_GEOMETRY
+    #global SKIP_TRJ
 
     print(f"Calc with save_struct={save_structs}")
 
@@ -320,13 +366,20 @@ def calc_energy(
     print(dihedrals)
     print(list(zip(*dihedrals)))
 
-    if(xyz_upd is None):
-        WRONG_GEOMETRY = False
-        SKIP_TRJ = True
-        return None
+    if check_is_broken(xyz_upd, BOND_LENGTH_THRESHOLD):
+        print(f"Seems that some atoms in current structure is closer then {BOND_LENGTH_THRESHOLD}!")
+        print(f"Returning broken_struct_energy that is {BROKEN_STRUCT_ENERGY}")
+        return BROKEN_STRUCT_ENERGY
 
-    if WRONG_GEOMETRY:    
-        return 100
+    #if(xyz_upd is None):
+    #    WRONG_GEOMETRY = False
+    #    SKIP_TRJ = True
+    #    return None
+
+    #if WRONG_GEOMETRY:    
+    #    return 100
+
+    opt_status = True
 
     if not USE_ORCA:
         gjf_name = mol_to_gjf_name(mol_file_name)
@@ -336,7 +389,7 @@ def calc_energy(
         generate_default_gjf(xyz_upd, gjf_name)
         start_calc(gjf_name)
         wait_for_the_end_of_calc(log_name, 250)
-        res = find_energy_in_log(log_name)
+        res, opt_status = find_energy_in_log(log_name)
     else:
         inp_name = mol_to_inp_name(mol_file_name)
         out_name = inp_to_out_name(inp_name)
@@ -345,8 +398,10 @@ def calc_energy(
         generate_default_oinp(xyz_upd, dihedrals, inp_name, constrained_opt=constrained_opt)
         start_calc(inp_name)
         wait_for_the_end_of_calc(out_name, 1000)
-        res = find_energy_in_log(out_name) * HARTRI_TO_KCAL - norm_energy
-    return res
+        res, opt_status = find_energy_in_log(out_name) 
+        res = res if not opt_status else res * HARTRI_TO_KCAL - norm_energy
+    print(f"opt status in calc_energy is {opt_status}")
+    return res, opt_status
 
 def load_last_optimized_structure_xyz_block(mol_file_name : str) -> str:
     full_xyz = []

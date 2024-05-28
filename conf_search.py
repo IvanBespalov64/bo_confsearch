@@ -69,6 +69,8 @@ model_chk = None
 current_minima = 1e9
 acq_vals_log = []
 
+LAST_OPT_OK = True
+
 def degrees_to_potentials(
     degrees : np.ndarray,
     mean_func_coefs : np.ndarray
@@ -85,22 +87,22 @@ def parse_args_to_mean_func(inp):
     """
     return tf.transpose(inp)
 
-def temp_calc(a : float, b  :float) -> float:
-    """
-        fast temp calc with cur dihedrals
-    """
-    if(tf.is_tensor(a)):
-        a = a.numpy()
-    if(tf.is_tensor(b)):
-        b = b.numpy() 
-    return (calc_energy(MOL_FILE_NAME, [([1, 2, 3, 4], a),\
-                                         ([0, 1, 2, 3], b)], RANDOM_DISPLACEMENT) - NORM_ENERGY) * 627.509474063 
-
 def calc(dihedrals : list[float]) -> float:
     """
         Perofrms calculating of energy with current dihedral angels
     """
     
+    def dump_status_hook(
+        dumping_value : bool,
+        filename : str = exp_name+"_last_opt_status.json"
+    ) -> None:
+        with open(filename, 'w') as file:
+            json.dump({
+                "LAST_OPT_OK" : dumping_value
+            }, file)
+
+    global LAST_OPT_OK
+
     if model_chk:
         print(f"Checkpoint is not null, calculating previous acq. func. max!")
         dihedrals_tf = tf.constant(dihedrals, dtype=tf.float64)
@@ -125,14 +127,21 @@ def calc(dihedrals : list[float]) -> float:
 
     #Pre-opt
     print('Optimizing constrained struct')
-    _ = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, constrained_opt=True)
+    en, preopt_status = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, constrained_opt=True)
+    LAST_OPT_OK = preopt_status
+    print(f"Status of preopt: {preopt_status}; LAST_OPT_OK: {LAST_OPT_OK}")
+    if not preopt_status:
+        dump_status_hook(dumping_value=LAST_OPT_OK)
+        return en + np.random.randn()
     print('Optimized!\nLoading xyz from preopt')
     xyz_from_constrained = load_last_optimized_structure_xyz_block(MOL_FILE_NAME)
     print('Loaded!\nFull opt')
-    en = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, force_xyz_block=xyz_from_constrained)
+    en, opt_status = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, force_xyz_block=xyz_from_constrained)
+    LAST_OPT_OK = opt_status
+    print(f"Status of opt: {opt_status}; LAST_OPT_OK: {LAST_OPT_OK}")
     print(f'Optimized! En = {en}')
-
-    return en
+    dump_status_hook(dumping_value=LAST_OPT_OK)
+    return en + ((not opt_status) * np.random.randn())
 
 def max_comp_dist(x1, x2, period : float = 2 * np.pi):
     """
@@ -512,7 +521,7 @@ load_params_from_config({field.name : getattr(config, field.name) for field in f
 print("Coef calculator creatring")
 
 coef_matrix = CoefCalculator(
-    mol=Chem.MolFromMolFile(MOL_FILE_NAME),
+    mol=Chem.RemoveHs(Chem.MolFromMolFile(MOL_FILE_NAME)),
     config=config, 
     dir_for_inps=f"{exp_name}_scans/", 
     db_connector=LocalConnector('dihedral_logs.db')
@@ -539,19 +548,19 @@ amps = np.array([
 
 potential_func = PotentialFunction(mean_func_coefs)
 
-kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)]) + TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
+kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)])# + TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
 
 kernel.kernels[1].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
-kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
+#kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
 
 search_space = Box([0. for _ in range(search_dim)], [2 * np.pi for _ in range(search_dim)])  # define the search space directly
 
 #Calc normalizing energy
 #in kcal/mol!
 
-NORM_ENERGY = calc_energy(MOL_FILE_NAME, dihedrals=[], norm_energy=0.)#-367398.19960427243
+NORM_ENERGY, _ = calc_energy(MOL_FILE_NAME, dihedrals=[], norm_energy=0.)#-367398.19960427243
 
-print(f"Norm energy: (NORM_ENERGY")
+print(f"Norm energy: {NORM_ENERGY}")
 
 observer = trieste.objectives.utils.mk_observer(func) # defines a observer of our 'func'
 
@@ -560,8 +569,12 @@ dataset = None
 
 for idx in range(config.num_initial_points):
     initial_query_points = search_space.sample_sobol(1)
-    observer(initial_query_points) # noqa
-    dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
+    observed_point = observer(initial_query_points)
+    if not LAST_OPT_OK:
+        print(f"Optimization didn't finished well. Continue only with broken_struct_energy in required point: {observed_point}")
+        dataset = observed_point if not dataset else dataset + observed_point
+    else:
+        dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
     
 print(f"Initial dataset observed! {config.num_initial_points} minima observed, total {dataset.query_points.shape[0]} points has been collected!")
 
@@ -599,7 +612,10 @@ current_minima = tf.reduce_min(dataset.observations).numpy()
 
 #left_borders, right_borders = roi_calc(model.model, MINIMA)
 
-rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
+#This should be used!
+#####rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
+
+rule = EfficientGlobalOptimization(ExpectedImprovement())
 
 #rule = EfficientGlobalOptimization(SparseGradExpectedImprovement(MINIMA, left_borders, right_borders))
 #rule = EfficientGlobalOptimization(ExpectedImprovement())
@@ -613,16 +629,23 @@ deepest_minima = []
 early_termination_flag = False
 
 for step in range(1, config.max_steps+1):
-
+    print(f"Previous last_opt_ok: {LAST_OPT_OK}")
     print(f"Step number {step}")
 
     try:
-        result = bo.optimize(1, dataset, model, rule, fit_initial_model = False)
+        result = bo.optimize(1, dataset, model, rule, fit_initial_model=False)
         print(f"Optimization step {step} succeed!")
     except Exception:
         print("Optimization failed")
         print(result.astuple()[1][-1].dataset)
     
+    print(f"After step: {LAST_OPT_OK}")
+
+    last_opt_status = None
+    with open(exp_name+"_last_opt_status.json", "r") as file:
+        last_opt_status = json.load(file)
+    print(last_opt_status)
+
     dataset = result.try_get_final_dataset()
     model = result.try_get_final_model()
     print(f"Last asked point was {ASKED_POINTS[-1]}")
@@ -640,9 +663,11 @@ for step in range(1, config.max_steps+1):
     #print(f"Dataset size was {len(dataset)}")
 
     print(f"Eta is {rule._acquisition_function._eta}")    
-
-    dataset = erase_last_from_dataset(dataset, 1)
-    dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
+    if LAST_OPT_OK:
+        dataset = erase_last_from_dataset(dataset, 1)
+        dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", dataset)
+    else:
+        print(f"Last optimization finished with error, skipping trj parsing!")
     model.update(dataset)
     model.optimize(dataset)
 

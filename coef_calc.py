@@ -242,6 +242,24 @@ class CoefCalculator:
                 result = result.replace(f"<{case_sensetive_atom}>", case_sensetive_atom)
         return result
 
+    def _sanitize_smiles(
+        self,
+        cur_smiles : str
+    ) -> str:
+        cur_mol = Chem.MolFromSmiles(cur_smiles)
+        while True:
+            print(f"Cur smiles: {Chem.MolToSmiles(cur_mol)}; Num of radical electrons: {sum([cur.GetNumRadicalElectrons() for cur in cur_mol.GetAtoms()])}")
+            found_radical_electrons = False
+            for atom in cur_mol.GetAtoms():
+                print(atom.GetNumRadicalElectrons(), atom.GetNumExplicitHs())
+                found_radical_electrons |= atom.GetNumRadicalElectrons()
+                atom.SetNumExplicitHs(atom.GetNumExplicitHs()+atom.GetNumRadicalElectrons())
+            cur_mol = Chem.MolFromSmiles(Chem.MolToSmiles(cur_mol))
+            if not found_radical_electrons:
+                break
+            
+        return Chem.MolToSmiles(Chem.RemoveAllHs(cur_mol))
+
     def get_interesting_frags(self) -> list[Chem.rdchem.Mol]:
         """
             returns a list of simple molecules with one
@@ -279,18 +297,7 @@ class CoefCalculator:
             
             # Looks like shit, but works... I should rewrite it
 
-            rotable_frag_mol = Chem.MolFromSmiles(rotable_frag_smiles)
-            
-            while True:
-                found_radical_electrons = False
-                for atom in rotable_frag_mol.GetAtoms():
-                    found_radical_electrons |= atom.GetNumRadicalElectrons()
-                    atom.SetNumExplicitHs(atom.GetNumExplicitHs()+atom.GetNumRadicalElectrons())
-                rotable_frag_mol = Chem.MolFromSmiles(Chem.MolToSmiles(rotable_frag_mol))
-                if not found_radical_electrons:
-                    break
-                
-            rotable_frag_smiles = Chem.MolToSmiles(Chem.RemoveAllHs(rotable_frag_mol))
+            rotable_frag_smiles = self._sanitize_smiles(rotable_frag_smiles)
 
             rotable_frags.append(
                 Chem.MolFromSmiles(
@@ -298,14 +305,20 @@ class CoefCalculator:
                 )
             )
 
+            print(f"rot_frag_smiles: {rotable_frag_smiles}\nidxs_to_rotate: {self.get_idxs_to_rotate(rotable_frags[-1])}")
+
             query_result = self.mol.GetSubstructMatches(
                 Chem.MolFromSmiles(
-                    Chem.rdmolfiles.MolFragmentToSmiles(
-                        rotable_frags[-1],
-                        atomsToUse=self.get_idxs_to_rotate(rotable_frags[-1])
+                    self._sanitize_smiles(
+                        Chem.rdmolfiles.MolFragmentToSmiles(
+                            rotable_frags[-1],
+                            atomsToUse=self.get_idxs_to_rotate(rotable_frags[-1])
+                        )
                     )
                 )
             )
+    
+            print(f"query_result: {query_result}")
 
             old_idxs = ()
 

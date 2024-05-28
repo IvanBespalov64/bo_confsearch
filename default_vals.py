@@ -9,6 +9,8 @@ class ConfSearchConfig:
     orca_exec_command : str = "/opt/orca5/orca"
     num_of_procs : int = 8
     orca_method : str = "lda sto-3g"
+    broken_struct_energy : float = 100.
+    bond_length_threshold : float = 0.7
     ts : bool = False
     rolling_window_size : int = 5
     rolling_std_threshold : float = 0.15
@@ -16,7 +18,7 @@ class ConfSearchConfig:
     num_initial_points : int = 3
     max_steps : int = 50,
     exp_name : str = "cs"
-    
+        
 #USE_ORCA=True
 #ORCA_EXEC_COMMAND = "/opt/orca5/orca"
 #GAUSSIAN_EXEC_COMMAND = "srung"
