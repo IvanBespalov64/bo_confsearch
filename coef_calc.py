@@ -251,7 +251,6 @@ class CoefCalculator:
             print(f"Cur smiles: {Chem.MolToSmiles(cur_mol)}; Num of radical electrons: {sum([cur.GetNumRadicalElectrons() for cur in cur_mol.GetAtoms()])}")
             found_radical_electrons = False
             for atom in cur_mol.GetAtoms():
-                print(atom.GetNumRadicalElectrons(), atom.GetNumExplicitHs())
                 found_radical_electrons |= atom.GetNumRadicalElectrons()
                 atom.SetNumExplicitHs(atom.GetNumExplicitHs()+atom.GetNumRadicalElectrons())
             cur_mol = Chem.MolFromSmiles(Chem.MolToSmiles(cur_mol))

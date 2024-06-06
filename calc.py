@@ -369,7 +369,7 @@ def calc_energy(
     if check_is_broken(xyz_upd, BOND_LENGTH_THRESHOLD):
         print(f"Seems that some atoms in current structure is closer then {BOND_LENGTH_THRESHOLD}!")
         print(f"Returning broken_struct_energy that is {BROKEN_STRUCT_ENERGY}")
-        return BROKEN_STRUCT_ENERGY
+        return BROKEN_STRUCT_ENERGY, False
 
     #if(xyz_upd is None):
     #    WRONG_GEOMETRY = False
