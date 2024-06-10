@@ -10,6 +10,7 @@ from calc import calc_energy, load_last_optimized_structure_xyz_block
 from calc import change_dihedrals
 from calc import parse_points_from_trj
 from calc import load_params_from_config
+from calc import increase_structure_id
 
 from coef_calc import CoefCalculator
 
@@ -132,6 +133,8 @@ def calc(dihedrals : list[float]) -> float:
     print(f"Status of preopt: {preopt_status}; LAST_OPT_OK: {LAST_OPT_OK}")
     if not preopt_status:
         dump_status_hook(dumping_value=LAST_OPT_OK)
+        skipped_structure_id = increase_structure_id()
+        print(f"Preopt finished with error! Structure with number {skipped_structure_id} will be skipped!")
         return en + np.random.randn()
     print('Optimized!\nLoading xyz from preopt')
     xyz_from_constrained = load_last_optimized_structure_xyz_block(MOL_FILE_NAME)
@@ -141,6 +144,11 @@ def calc(dihedrals : list[float]) -> float:
     print(f"Status of opt: {opt_status}; LAST_OPT_OK: {LAST_OPT_OK}")
     print(f'Optimized! En = {en}')
     dump_status_hook(dumping_value=LAST_OPT_OK)
+
+    if not opt_status:
+        skipped_structure_id = increase_structure_id() 
+        print(f"Opt finished with error! Structure with number {skipped_structure_id} will be skipped!")
+
     return en + ((not opt_status) * np.random.randn())
 
 def max_comp_dist(x1, x2, period : float = 2 * np.pi):
@@ -654,7 +662,8 @@ for step in range(1, config.max_steps+1):
     
     logs = {
         'acq_vals' : acq_vals_log,
-        'deepest_minima' : deepest_minima
+        'deepest_minima' : deepest_minima,
+        'norm_en' : NORM_ENERGY
     }
 
     with open(f"{exp_name}_logs.json", 'w') as file:

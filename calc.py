@@ -410,6 +410,11 @@ def load_last_optimized_structure_xyz_block(mol_file_name : str) -> str:
             full_xyz.append(line)
     return ''.join(full_xyz[2:])
 
+def increase_structure_id() -> int:
+    global CURRENT_STRUCTURE_ID
+    CURRENT_STRUCTURE_ID += 1
+    return CURRENT_STRUCTURE_ID - 1
+
 def dihedral_angle(a : list[float], b : list[float], c : list[float], d : list[float]) -> float:
     """
        Calculates dihedral angel between 4 points
