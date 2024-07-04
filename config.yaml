@@ -1,7 +1,7 @@
-mol_file_name : "tests/mol_12.mol"
-exp_name: "mol_12_base_2"
+mol_file_name : "tests/mol_0.mol"
+exp_name: "mol_0_bocs_16"
 spin_multiplicity : 1
-charge : 1
+charge : -3
 use_orca : True
 orca_exec_command: "/opt/orca5/orca"
 num_of_procs : 8

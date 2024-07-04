@@ -140,20 +140,6 @@ def change_dihedrals(mol_file_name : str,
         print("No such file!")
         return None
 
-def random_displacement(xyz : str, alpha : float):
-    """
-        xyz - xyz coord block 
-        displace all atoms on the distance 0 <= dr <= alpha
-        returns modified xyz coord block
-    """
-    res = ""
-    for line in xyz.split('\n'):
-        if line == "":
-            break
-        atom, coords = line.split()[0], np.array(list(map(float, line.split()[1:])))
-        res += atom + " " + " ".join(map(str, coords + alpha * np.random.random(3))) + "\n"
-    return res
-
 def to_degrees(dihedrals : list[dihedral]) -> list[dihedral]:
     """
         Convert rads to degrees in dihedrals
@@ -341,18 +327,13 @@ def calc_energy(
         dihedrals : list[dihedral] = [],
         norm_energy : float = 0, 
         save_structs : bool = True,
-        #RANDOM_DISPLACEMENT : bool = False,
         constrained_opt : bool = False,
         force_xyz_block : Union[None, str] = None
     ) -> float:
     """
         calculates energy of molecule from 'mol_file_name'
         with current properties and returns it as float
-        Also displace atoms on random distances is RANDOM_DISPLACEMENT = True
     """
-
-    #global WRONG_GEOMETRY
-    #global SKIP_TRJ
 
     print(f"Calc with save_struct={save_structs}")
 
@@ -370,14 +351,6 @@ def calc_energy(
         print(f"Seems that some atoms in current structure is closer then {BOND_LENGTH_THRESHOLD}!")
         print(f"Returning broken_struct_energy that is {BROKEN_STRUCT_ENERGY}")
         return BROKEN_STRUCT_ENERGY, False
-
-    #if(xyz_upd is None):
-    #    WRONG_GEOMETRY = False
-    #    SKIP_TRJ = True
-    #    return None
-
-    #if WRONG_GEOMETRY:    
-    #    return 100
 
     opt_status = True
 
@@ -494,19 +467,13 @@ def parse_points_from_trj(
 
     vals = {cluster_id : (1e9, -1) for cluster_id in range(num_of_clusters)}
 
-    #print(points)
-    #print(len(points))
-
     model = KMeans(n_clusters=num_of_clusters)
     model.fit(points)
     
     for i in range(len(points)):
         cluster = model.predict([points[i]])[0]
-        #print(cluster)
         if vals[cluster][0] > obs[i]:
             vals[cluster] = obs[i], i
-    #print(len(vals))
-    #print(vals)
     print(f"PARSING POINTS, CLUSTER NUM = {num_of_clusters}")
     if save_structs:
 

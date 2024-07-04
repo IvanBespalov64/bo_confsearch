@@ -18,14 +18,3 @@ class ConfSearchConfig:
     num_initial_points : int = 3
     max_steps : int = 50,
     exp_name : str = "cs"
-        
-#USE_ORCA=True
-#ORCA_EXEC_COMMAND = "/opt/orca5/orca"
-#GAUSSIAN_EXEC_COMMAND = "srung"
-#DEFAULT_NUM_OF_PROCS = 8
-#DEFAULT_METHOD = "RHF/STO-3G"
-#DEFAULT_ORCA_METHOD = "r2SCAN-3c TightSCF"
-#DEFAULT_ORCA_METHOD = "M062X 6-31+G(d) CPCM(water)"
-#DEFAULT_CHARGE = 0
-#DEFAULT_MULTIPL = 1
-#ts = False 
