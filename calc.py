@@ -482,11 +482,13 @@ def parse_points_from_trj(
                 cur_d.append(dihedral_angle(a_coord, b_coord, c_coord, d_coord))
             result.append((cur_d, energy))
     
+    print(f"Points in trj: {len(result)}")
+    
+    if len(result) == 1:
+        return result
+
     points, obs = list(zip(*result[1:]))
 
-    print(f"Points in trj: {len(result)}")
-    #print(result)
-   
     num_of_clusters = min(3, len(points))
     print(f"Num of clusters: {num_of_clusters}")
 
