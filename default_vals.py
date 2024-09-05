@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from typing import Union
+
 @dataclass
 class ConfSearchConfig:
     mol_file_name : str
@@ -18,6 +20,7 @@ class ConfSearchConfig:
     num_initial_points : int = 3
     max_steps : int = 50,
     exp_name : str = "cs"
+    load_ensemble : Union[str, None] = None
         
 #USE_ORCA=True
 #ORCA_EXEC_COMMAND = "/opt/orca5/orca"
