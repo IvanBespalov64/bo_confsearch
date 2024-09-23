@@ -422,5 +422,11 @@ def parse_points_from_trj(
                 file.write(structures[vals[cluster_id][1] + 1]) # because points parsed from result[1:]
             print("saved")
             CURRENT_STRUCTURE_ID += 1
-    
-    return [result[0]] + [(points[vals[cluster_id][1]], vals[cluster_id][0]) for cluster_id in vals], result[-1]
+   
+    minima_node = {
+        "coords" : result[-1][0],
+        "rel_en" : result[-1][1],
+        "xyz_block" : structures[-1]
+    }
+
+    return [result[0]] + [(points[vals[cluster_id][1]], vals[cluster_id][0]) for cluster_id in vals], minima_node

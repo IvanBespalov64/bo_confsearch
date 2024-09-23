@@ -199,7 +199,12 @@ def upd_dataset_from_trj(
         structures_path=structures_path, 
         return_minima=True,
     )
-    MINIMA.append(last_point) 
+
+    with open(f"{exp_name}_minima/{len(MINIMA)}.xyz", "w") as minima_xyz_writer:
+        minima_xyz_writer.write(last_point["xyz_block"])
+
+    MINIMA.append((last_point["coords"], last_point["rel_en"]))
+
     print(f"Parsed data: {parsed_data}")
     degrees, energies = zip(*parsed_data)
     print(f"Degrees: {degrees}\nEnergies: {energies}")
@@ -267,6 +272,7 @@ exp_name = config.exp_name
 
 if not os.path.exists(structures_path):
     os.makedirs(structures_path)
+    os.makedirs(structures_path[:-1]+"_minima"+"/")
 
 print(f"Performing conf. search with config: {config}")
 
@@ -372,6 +378,8 @@ deepest_minima = []
 
 early_termination_flag = False
 
+print(f"MINIMA: {MINIMA}")
+
 for step in range(1, config.max_steps+1):
     print(f"Previous last_opt_ok: {LAST_OPT_OK}")
     print(f"Step number {step}")
@@ -405,11 +413,6 @@ for step in range(1, config.max_steps+1):
     with open(f"{exp_name}_logs.json", 'w') as file:
         json.dump(logs, file)
 
-    #print(f"Dataset size was {len(dataset)}")
-
-    with open(f"{exp_name}_all_minima.json", "w") as json_minima_writer:
-        json.dump(MINIMA, json_minima_writer)
-
     print(f"Eta is {rule._acquisition_function._eta}")    
     if LAST_OPT_OK:
         dataset = erase_last_from_dataset(dataset, 1)
@@ -425,6 +428,9 @@ for step in range(1, config.max_steps+1):
     print("Updated!")
 
     print(f"Step {step} complited! Current dataset is:\n{dataset}")
+    
+    with open(f"{exp_name}_all_minima.json", "w") as json_minima_writer:
+        json.dump(MINIMA, json_minima_writer)
     
     if step < config.rolling_window_size:
         continue
@@ -446,6 +452,8 @@ for step in range(1, config.max_steps+1):
 if not early_termination_flag:
     print("Max number of steps has been reached!")
 
+print(f"MINIMA: {MINIMA}")
+
 # printing results
 query_points = dataset.query_points.numpy()
 observations = dataset.observations.numpy()
@@ -453,14 +461,14 @@ observations = dataset.observations.numpy()
 dbscan_labels = DBSCAN(
     eps=np.pi/12,
     min_pts=1,
-).fit_predict(query_points)
+).fit_predict(np.asarray([cur[0] for cur in MINIMA]))
 
 res = {int(label) : (1e9, -1) for label in np.unique(dbscan_labels)}
 
-for i in range(len(query_points)):
+for i in range(len(MINIMA)):
     cluster_id = dbscan_labels[i]
-    if observations[i] < res[cluster_id][0]:
-        res[cluster_id] = observations[i].tolist(), i
+    if MINIMA[i][1] < res[cluster_id][0]:
+        res[cluster_id] = MINIMA[i][1], i
 
 print(f"Results of clustering: {res}\nThere are relative energy and number of structure for each cluster. Saved in `{exp_name}_clustering_results.json`")
 json.dump(res, open(f'{exp_name}_clustering_results.json', 'w'))
@@ -469,7 +477,7 @@ print(f"Saving final ensemble into `{exp_name}_final_ensemble.xyz`")
 ens_xyz_str = ""
 for _, structure_id in res.values():
     cur_xyz = ""
-    with open(f"{exp_name}/{structure_id}.xyz", "r") as cur_xyz_reader:
+    with open(f"{exp_name}_minima/{structure_id}.xyz", "r") as cur_xyz_reader:
         cur_xyz = "".join([line for line in cur_xyz_reader])
     ens_xyz_str += cur_xyz + "\n"
 
