@@ -16,9 +16,7 @@ from typing import Dict
 
 HARTRI_TO_KCAL = 627.509474063 
 
-USE_ORCA = ConfSearchConfig.use_orca
 ORCA_EXEC_COMMAND = ConfSearchConfig.orca_exec_command
-GAUSSIAN_EXEC_COMMAND = None
 NUM_OF_PROCS = ConfSearchConfig.num_of_procs
 DEFAULT_METHOD = None
 ORCA_METHOD = ConfSearchConfig.orca_method
@@ -30,7 +28,6 @@ BOND_LENGTH_THRESHOLD = ConfSearchConfig.bond_length_threshold
 CURRENT_STRUCTURE_ID = 0 # global id for every structure that we would save
 
 WRONG_GEOMETRY = False
-SKIP_TRJ = False
 
 #Alias for type of node about dihedral angle 
 #that consists of list with four atoms and value of degree
@@ -40,7 +37,7 @@ def load_params_from_config(
     config : Dict[str, object]
 ) -> None:
     
-    global USE_ORCA, ORCA_EXEC_COMMAND, NUM_OF_PROCS, ORCA_METHOD, ORCA, CHARGE, MULTIPL
+    global ORCA_EXEC_COMMAND, NUM_OF_PROCS, ORCA_METHOD, ORCA, CHARGE, MULTIPL
     
     print(f"Loading calculation config!")
     update_number = 0
@@ -58,15 +55,6 @@ def load_params_from_config(
             CHARGE = config["charge"]
             update_number += 1
 
-    if "use_orca" in config:
-        if not isinstance(config["use_orca"], bool):
-            print(f"use_orca should be bool! Continue with default value {USE_ORCA}")
-        elif not config["use_orca"]:
-            print("Now only orca calculations supported! Continue with use_orca=True")
-        else:
-            USE_ORCA = config["use_orca"]
-            update_number += 1
-    
     if "orca_exec_command" in config:
         if not isinstance(config["orca_exec_command"], str):
             print(f"Orca execution command should be str! Continue with default value {ORCA_EXEC_COMMAND}")
@@ -140,20 +128,6 @@ def change_dihedrals(mol_file_name : str,
         print("No such file!")
         return None
 
-def random_displacement(xyz : str, alpha : float):
-    """
-        xyz - xyz coord block 
-        displace all atoms on the distance 0 <= dr <= alpha
-        returns modified xyz coord block
-    """
-    res = ""
-    for line in xyz.split('\n'):
-        if line == "":
-            break
-        atom, coords = line.split()[0], np.array(list(map(float, line.split()[1:])))
-        res += atom + " " + " ".join(map(str, coords + alpha * np.random.random(3))) + "\n"
-    return res
-
 def to_degrees(dihedrals : list[dihedral]) -> list[dihedral]:
     """
         Convert rads to degrees in dihedrals
@@ -174,31 +148,6 @@ def read_xyz(name : str) -> list[str]:
         for line in file:
             xyz.append(line)
     return '\n'.join(xyz)
-
-def generate_gjf(coords : str,
-                 gjf_name : str,
-                 num_of_procs : int,
-                 method_of_calc : str,
-                 charge : int,
-                 multipl : int):
-    """
-        coords - xyz coords bloack with '\n' sep
-        generate .gjf file for calculation energy of 'coords' by 'method_of_calc'
-    """
-    with open(gjf_name, 'w+') as file:
-        file.write("%nprocs=" + str(num_of_procs) + "\n" + "\n")
-        file.write("#P " + method_of_calc + "\n" + "\n")
-        file.write(gjf_name + "\n" + "\n")
-        file.write(str(charge) + " " + str(multipl) + "\n")
-        file.write(coords)
-        file.write("\n" + "\n")
-
-def generate_default_gjf(coords : str, gjf_name : str):
-    """
-        generate .gjf with default properties
-    """
-    generate_gjf(coords, gjf_name, NUM_OF_PROCS, DEFAULT_METHOD,\
-                                         CHARGE, MULTIPL)
 
 def generate_oinp(
         coords : str, 
@@ -238,25 +187,10 @@ def start_calc(gjf_name : str):
     """
         Running calculation
     """	
-    if not USE_ORCA:
-        os.system(GAUSSIAN_EXEC_COMMAND + " " + gjf_name)
-    else:
-        sbatch_name = gjf_name.split('/')[-1][:-4] + ".sh"
-        os.system("cp sbatch_temp " + sbatch_name)
-        os.system("echo \"" + ORCA_EXEC_COMMAND + " " + gjf_name + " > " + gjf_name[:-4] + ".out\"" + " >> " + sbatch_name) 
-        os.system("sbatch " + sbatch_name)    
-
-def gjf_to_log_name(gjf_name : str) -> str:
-    """
-        generating name of log file from gjf file name
-    """
-    return gjf_name[:-4] + ".log"
-
-def mol_to_gjf_name(mol_file_name : str) -> str:
-    """
-        generating name of gjf file from mol file name
-    """
-    return mol_file_name[:-4] + ".gjf"
+    sbatch_name = gjf_name.split('/')[-1][:-4] + ".sh"
+    os.system("cp sbatch_temp " + sbatch_name)
+    os.system("echo \"" + ORCA_EXEC_COMMAND + " " + gjf_name + " > " + gjf_name[:-4] + ".out\"" + " >> " + sbatch_name) 
+    os.system("sbatch " + sbatch_name)    
 
 def mol_to_inp_name(mol_file_name : str) -> str:
     """
@@ -279,11 +213,8 @@ def wait_for_the_end_of_calc(log_name : str, timeout):
         try: 
             with open(log_name, 'r') as file:
                 log_file = [line for line in file]               
-                if(not USE_ORCA and ("Normal termination" in log_file[-1] or\
-                   "File lengths" in log_file[-1])):
-                    break
-                if(USE_ORCA and ("ORCA TERMINATED NORMALLY" in log_file[-2] or\
-                                 "ORCA finished by error" in log_file[-5])):
+                if("ORCA TERMINATED NORMALLY" in log_file[-2] or\
+                        "ORCA finished by error" in log_file[-5]):
                     break
         except FileNotFoundError:
             pass
@@ -298,12 +229,8 @@ def find_energy_in_log(log_name : str) -> tuple[float, bool]:
     """
     try:
         with open(log_name, 'r') as file:
-            if not USE_ORCA:
-                en_line = [line for line in file if "SCF Done" in line][0]
-                en = float(en_line.split()[4])
-            else:
-                en_line = [line for line in file if "FINAL SINGLE POINT ENERGY" in line][-1]
-                en = float(en_line.split()[4])
+            en_line = [line for line in file if "FINAL SINGLE POINT ENERGY" in line][-1]
+            en = float(en_line.split()[4])
             return en, True
     except FileNotFoundError:
         print(f"No log file! Something went wrong! Finishing!")
@@ -341,7 +268,6 @@ def calc_energy(
         dihedrals : list[dihedral] = [],
         norm_energy : float = 0, 
         save_structs : bool = True,
-        #RANDOM_DISPLACEMENT : bool = False,
         constrained_opt : bool = False,
         force_xyz_block : Union[None, str] = None
     ) -> float:
@@ -350,9 +276,6 @@ def calc_energy(
         with current properties and returns it as float
         Also displace atoms on random distances is RANDOM_DISPLACEMENT = True
     """
-
-    #global WRONG_GEOMETRY
-    #global SKIP_TRJ
 
     print(f"Calc with save_struct={save_structs}")
 
@@ -371,35 +294,17 @@ def calc_energy(
         print(f"Returning broken_struct_energy that is {BROKEN_STRUCT_ENERGY}")
         return BROKEN_STRUCT_ENERGY, False
 
-    #if(xyz_upd is None):
-    #    WRONG_GEOMETRY = False
-    #    SKIP_TRJ = True
-    #    return None
-
-    #if WRONG_GEOMETRY:    
-    #    return 100
-
     opt_status = True
 
-    if not USE_ORCA:
-        gjf_name = mol_to_gjf_name(mol_file_name)
-        log_name = gjf_to_log_name(gjf_name)
-        if os.path.isfile(log_name):
-            os.system("rm -r " + log_name)     
-        generate_default_gjf(xyz_upd, gjf_name)
-        start_calc(gjf_name)
-        wait_for_the_end_of_calc(log_name, 250)
-        res, opt_status = find_energy_in_log(log_name)
-    else:
-        inp_name = mol_to_inp_name(mol_file_name)
-        out_name = inp_to_out_name(inp_name)
-        if os.path.isfile(out_name):
-            os.system("rm -r " + out_name)
-        generate_default_oinp(xyz_upd, dihedrals, inp_name, constrained_opt=constrained_opt)
-        start_calc(inp_name)
-        wait_for_the_end_of_calc(out_name, 1000)
-        res, opt_status = find_energy_in_log(out_name) 
-        res = res if not opt_status else res * HARTRI_TO_KCAL - norm_energy
+    inp_name = mol_to_inp_name(mol_file_name)
+    out_name = inp_to_out_name(inp_name)
+    if os.path.isfile(out_name):
+        os.system("rm -r " + out_name)
+    generate_default_oinp(xyz_upd, dihedrals, inp_name, constrained_opt=constrained_opt)
+    start_calc(inp_name)
+    wait_for_the_end_of_calc(out_name, 1000)
+    res, opt_status = find_energy_in_log(out_name) 
+    res = res if not opt_status else res * HARTRI_TO_KCAL - norm_energy
     print(f"opt status in calc_energy is {opt_status}")
     return res, opt_status
 
@@ -451,12 +356,6 @@ def parse_points_from_trj(
         returns list of description of dihedrals
         for every point
     """
-
-    global SKIP_TRJ
-
-    if SKIP_TRJ:
-        SKIP_TRJ = False
-        return []
 
     print(f"Parsing starts with norm_en={norm_en}, save_struct={save_structs}")
 

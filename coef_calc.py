@@ -7,7 +7,6 @@ import numpy as np
 from default_vals import ConfSearchConfig
 import calc
 
-from mean_cos import BaseCos
 from coef_from_grid import calc_coefs
 
 from db_connector import Connector

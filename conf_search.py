@@ -16,10 +16,11 @@ from db_connector import LocalConnector
 
 from ensemble_processor import EnsembleProcessor 
 
-from dataclasses import fields
-
 from imp_var import ImprovementVariance
 
+from dbscan import DBSCAN
+
+from dataclasses import fields
 import trieste
 import gpflow
 import numpy as np
@@ -41,8 +42,6 @@ from default_vals import ConfSearchConfig
 from trieste.acquisition.function import ExpectedImprovement
 
 from rdkit import Chem
-
-from sklearn.cluster import DBSCAN
 
 from tensorflow.python.ops.numpy_ops import np_config
 np_config.enable_numpy_behavior()
@@ -66,6 +65,8 @@ current_minima = 1e9
 acq_vals_log = []
 
 LAST_OPT_OK = True
+
+MINIMA = []
 
 def degrees_to_potentials(
     degrees : np.ndarray,
@@ -198,7 +199,7 @@ def upd_dataset_from_trj(
         structures_path=structures_path, 
         return_minima=True,
     )
-    #MINIMA.append(last_point[0]) 
+    MINIMA.append(last_point) 
     print(f"Parsed data: {parsed_data}")
     degrees, energies = zip(*parsed_data)
     print(f"Degrees: {degrees}\nEnergies: {energies}")
@@ -291,8 +292,6 @@ for ids, coefs in coef_matrix:
 print("Dihedral ids", DIHEDRAL_IDS)
 print("Mean func coefs", mean_func_coefs)
 
-print(EnsembleProcessor(config.load_ensemble, dihedral_idxs=DIHEDRAL_IDS).get_tf_data())
-
 search_dim = len(DIHEDRAL_IDS)
 
 print("Cur search dim is", search_dim)
@@ -344,17 +343,11 @@ else:
     
         print(f"Initial dataset observed! {config.num_initial_points} minima observed, total {dataset.query_points.shape[0]} points has been collected!")
 
-#initial_data = observer(initial_query_points)
-
-#MINIMA = initial_data.query_points.numpy().tolist()
-
 gpr = gpflow.models.GPR(
-#gpr = GPRwithGrads(
     dataset.astuple(), 
     kernel
 )
 
-#print(gpr.parameters)
 gpflow.set_trainable(gpr.likelihood, False)
 gpflow.set_trainable(gpr.kernel.kernels[0].variance, False)
 gpflow.set_trainable(gpr.kernel.kernels[1].period, False)
@@ -365,30 +358,15 @@ bo = trieste.bayesian_optimizer.BayesianOptimizer(observer, search_space)
 
 print(f"Initital data:\n{dataset}")
 
-#dataset = upd_dataset_from_trj(f"{MOL_FILE_NAME[:-4]}_trj.xyz", initial_data, mean_func_coefs)
-#model.update(dataset)
-#model.optimize(dataset)
-
 model.optimize(dataset)
 
 model_chk = gpflow.utilities.deepcopy(model.model)
 current_minima = tf.reduce_min(dataset.observations).numpy()
 
-#print(f"Current dataset after init:\n{dataset}")
-
-#left_borders, right_borders = roi_calc(model.model, MINIMA)
-
 #This should be used!
 rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
 
 #rule = EfficientGlobalOptimization(ExpectedImprovement())
-
-#rule = EfficientGlobalOptimization(SparseGradExpectedImprovement(MINIMA, left_borders, right_borders))
-#rule = EfficientGlobalOptimization(ExpectedImprovement())
-
-#f = open("conf_search.log", "w+")
-
-#print(dataset, file=f)
 
 deepest_minima = []
 
@@ -429,6 +407,9 @@ for step in range(1, config.max_steps+1):
 
     #print(f"Dataset size was {len(dataset)}")
 
+    with open(f"{exp_name}_all_minima.json", "w") as json_minima_writer:
+        json.dump(MINIMA, json_minima_writer)
+
     print(f"Eta is {rule._acquisition_function._eta}")    
     if LAST_OPT_OK:
         dataset = erase_last_from_dataset(dataset, 1)
@@ -462,28 +443,6 @@ for step in range(1, config.max_steps+1):
         early_termination_flag = True
         break
 
-    #left_borders, right_borders = roi_calc(model.model, MINIMA)
-    
-#    rule._acquisition_function.update_roi(
-#        MINIMA,
-#        left_borders,
-#        right_borders,
-#    )
-
-    #print(f"Dataset size become {len(dataset)}")
-
-    #print(model.model.parameters)
-
-    #print(dataset.query_points.numpy(), file = f)
-
-    #cur_prob = get_max_unknown_prob(model.model, dataset.query_points.numpy(), dataset.observations.numpy(), steps, mean_func_coefs)
-    #save_plot(f"probs/plot_{steps}.html", dataset.query_points.numpy(), dataset.observations.numpy())
-    #save_acq(f"probs/acq_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy())
-    #save_prob(f"probs/prob_{steps}.html", model.model, dataset.query_points.numpy(), dataset.observations.numpy(), mean_func_coefs)
-    #print(f"Current prob: {cur_prob}", file = f)
-    
-    #probs.append(cur_prob)
-
 if not early_termination_flag:
     print("Max number of steps has been reached!")
 
@@ -491,21 +450,33 @@ if not early_termination_flag:
 query_points = dataset.query_points.numpy()
 observations = dataset.observations.numpy()
 
-dbscan_clf = DBSCAN(eps=np.pi/12,
-                    min_samples=2,
-                    metric=max_comp_dist).fit(query_points)
+dbscan_labels = DBSCAN(
+    eps=np.pi/12,
+    min_pts=1,
+).fit_predict(query_points)
 
-res = {int(label) : (1e9, -1) for label in np.unique(dbscan_clf.labels_)}
+res = {int(label) : (1e9, -1) for label in np.unique(dbscan_labels)}
 
 for i in range(len(query_points)):
-    cluster_id = dbscan_clf.labels_[i]
+    cluster_id = dbscan_labels[i]
     if observations[i] < res[cluster_id][0]:
         res[cluster_id] = observations[i].tolist(), i
 
 print(f"Results of clustering: {res}\nThere are relative energy and number of structure for each cluster. Saved in `{exp_name}_clustering_results.json`")
 json.dump(res, open(f'{exp_name}_clustering_results.json', 'w'))
 
-print(f"Saving full dataset at `{exp_name}_all_points.json`")
+print(f"Saving final ensemble into `{exp_name}_final_ensemble.xyz`")
+ens_xyz_str = ""
+for _, structure_id in res.values():
+    cur_xyz = ""
+    with open(f"{exp_name}/{structure_id}.xyz", "r") as cur_xyz_reader:
+        cur_xyz = "".join([line for line in cur_xyz_reader])
+    ens_xyz_str += cur_xyz + "\n"
+
+with open(f"{exp_name}_final_ensemble.xyz", "w") as ens_writer:
+    ens_writer.write(ens_xyz_str)
+
+print(f"Saving all points at `{exp_name}_all_points.json`")
 json.dump(
     {
         'query_points' : query_points.tolist(),
