@@ -10,9 +10,9 @@ import numpy as np
 
 from sklearn.cluster import KMeans
 
-from default_vals import ConfSearchConfig
-
 from typing import Dict
+
+from default_vals import ConfSearchConfig
 
 HARTRI_TO_KCAL = 627.509474063 
 

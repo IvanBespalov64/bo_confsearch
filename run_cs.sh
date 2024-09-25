@@ -10,4 +10,4 @@ export OMP_STACKSIZE=10G
 export OMP_NUM_THREADS=1,1
 export MKL_NUM_THREADS=1
 
-python conf_search.py
+python bo_confsearch/conf_search.py --config=config.yaml

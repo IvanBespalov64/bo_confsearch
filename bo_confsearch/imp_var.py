@@ -11,7 +11,8 @@ from trieste.acquisition import ExpectedImprovement
 from trieste.acquisition.interface import (
     AcquisitionFunction,
     AcquisitionFunctionClass,
-    SingleModelAcquisitionBuilder)
+    SingleModelAcquisitionBuilder
+)
 from trieste.models import ProbabilisticModel
 
 from typing import cast

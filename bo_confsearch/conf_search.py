@@ -1,24 +1,19 @@
-#import calc # For init CURRENT_STRUCTURE_ID
-
 from transform_kernel import TransformKernel
-
 from coef_from_grid import pes, pes_tf, pes_tf_grad
-
-from calc import calc_energy, load_last_optimized_structure_xyz_block
-from calc import change_dihedrals
-from calc import parse_points_from_trj
-from calc import load_params_from_config
-from calc import increase_structure_id
-
+from calc import (
+    calc_energy, 
+    load_last_optimized_structure_xyz_block,
+    change_dihedrals,
+    parse_points_from_trj,
+    load_params_from_config,
+    increase_structure_id
+)
 from coef_calc import CoefCalculator
-
 from db_connector import LocalConnector
-
 from ensemble_processor import EnsembleProcessor 
-
 from imp_var import ImprovementVariance
-
 from dbscan import DBSCAN
+from default_vals import ConfSearchConfig
 
 from dataclasses import fields
 import trieste
@@ -36,8 +31,7 @@ import sys
 import os
 import yaml
 import json
-
-from default_vals import ConfSearchConfig
+import argparse
 
 from trieste.acquisition.function import ExpectedImprovement
 
@@ -250,15 +244,24 @@ class PotentialFunction():
                     axis=1
                 )
 
-print("Reading config.yaml")
+parser = argparse.ArgumentParser(
+    prog="bo_confsearch",
+    description="Bayesian optimization for conformational search",
+)
+
+parser.add_argument('--config', default='config.yaml')
+
+args = parser.parse_args()
+
+print(f"Reading config {args.config}")
 
 raw_config = {}
 
 try:
-    with open('config.yaml', 'r') as file:
+    with open(args.config, 'r') as file:
         raw_config = yaml.safe_load(file)
 except FileNotFoundError:
-    print("No config.yaml!\nFinishing!")
+    print(f"No config file {args.config}!\nFinishing!")
     exit(0)
 except Exception:
     print("Something went wrong!\nFinishing!")

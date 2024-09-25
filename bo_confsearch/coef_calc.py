@@ -4,16 +4,13 @@ from rdkit.Chem.rdMolTransforms import SetDihedralRad
 
 import numpy as np
 
-from default_vals import ConfSearchConfig
-import calc
-
-from coef_from_grid import calc_coefs
-
-from db_connector import Connector
-
+from typing import Union
 import os
 
-from typing import Union
+from default_vals import ConfSearchConfig
+from calc import start_calc, wait_for_the_end_of_calc
+from coef_from_grid import calc_coefs
+from db_connector import Connector
 
 class CoefCalculator:
     """
@@ -435,7 +432,7 @@ class CoefCalculator:
         for inp_name in lst:
             out_name = inp_name[:-3] + "out"
             if not (self.scanfile2smiles[inp_name] in self.fetched_coefs):
-                calc.wait_for_the_end_of_calc(out_name, 1000)
+                wait_for_the_end_of_calc(out_name, 1000)
 
         result = []
 
@@ -462,7 +459,7 @@ class CoefCalculator:
         inp_files = self.generate_scan_inps_from_mol()
         for cur in inp_files:
             if not (self.scanfile2smiles[cur] in self.fetched_coefs):
-               calc.start_calc(cur)    
+               start_calc(cur)    
         return self.get_energies_from_scans(inp_files)
 
     def calc(self) -> list[list[float]]:
