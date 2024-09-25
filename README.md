@@ -33,5 +33,5 @@ Conformational search configures from config.yaml file, that should be placed ne
 * num_initial_points : int - number of randomly selecting initial points for method
 * max_steps : int - maximum number of steps of Bayesian optimization
 * load_ensemble : str - path to .xyz file with already calculated ensemble if you want to refine ensemble
-
+* acquisition_function : str - defines acquisition function to use. If "ei" is passed - ExpectedImprovement is used, if "iv" - our acquisition function, named ImprovementVariance
 

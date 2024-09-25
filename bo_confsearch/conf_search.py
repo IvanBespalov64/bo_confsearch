@@ -277,6 +277,10 @@ if not os.path.exists(structures_path):
     os.makedirs(structures_path)
     os.makedirs(structures_path[:-1]+"_minima"+"/")
 
+if config.acquisition_function not in {"ei", "iv"}:
+    print(f"Acquisition function should be one of the following: 'ei', 'iv', got {config.acquisition_function}; Continue with default: 'iv'")
+    config.acquisition_function = "iv"
+
 print(f"Performing conf. search with config: {config}")
 
 load_params_from_config({field.name : getattr(config, field.name) for field in fields(config)}) # TODO: rewrite in better way
@@ -372,8 +376,17 @@ model.optimize(dataset)
 model_chk = gpflow.utilities.deepcopy(model.model)
 current_minima = tf.reduce_min(dataset.observations).numpy()
 
-#This should be used!
-rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
+rule = None
+
+match config.acquisition_function:
+    case "iv":
+        print("Continue with ImprovementVariance acquisition function!")
+        rule = EfficientGlobalOptimization(ImprovementVariance(threshold=3))
+    case "ei": 
+        print("Continue with ExpectedImprovement acquisition function!")
+        rule = EfficientGlobalOptimization(ExpectedImprovement())
+    case _:
+        raise ValueError(f"Unknown acquisition function {config.acquisition_function}")
 
 #rule = EfficientGlobalOptimization(ExpectedImprovement())
 

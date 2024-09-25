@@ -20,6 +20,7 @@ class ConfSearchConfig:
     max_steps : int = 50,
     exp_name : str = "cs"
     load_ensemble : Union[str, None] = None
+    acquisition_function : str = "iv"
         
 #ORCA_EXEC_COMMAND = "/opt/orca5/orca"
 #DEFAULT_NUM_OF_PROCS = 8
