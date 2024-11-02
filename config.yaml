@@ -13,3 +13,5 @@ rolling_mean_threshold : 0
 num_initial_points : 1
 max_steps : 1
 acquisition_function : "ei"
+dihedral_logs : "dihedral_logs.db"
+use_pi_kernel : False

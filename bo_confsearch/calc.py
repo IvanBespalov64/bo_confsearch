@@ -368,6 +368,8 @@ def parse_points_from_trj(
     with open(trj_file_name, "r") as file:
         lines = [line[:-1] for line in file]
         n = int(lines[0])
+        print(f"dihedrals: {dihedrals}")
+        print(f"Lines: {lines}")
         for i in range(len(lines) // (n + 2)):
             structures.append("\n".join(lines[i * (n + 2) : (i + 1) * (n + 2)]))
             
@@ -393,7 +395,8 @@ def parse_points_from_trj(
 
     vals = {cluster_id : (1e9, -1) for cluster_id in range(num_of_clusters)}
 
-    #print(points)
+    print(f"result: {result}")
+    print(f"points: {points}")
     #print(len(points))
 
     model = KMeans(n_clusters=num_of_clusters)

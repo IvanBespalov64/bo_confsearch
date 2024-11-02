@@ -14,6 +14,7 @@ from ensemble_processor import EnsembleProcessor
 from imp_var import ImprovementVariance
 from dbscan import DBSCAN
 from default_vals import ConfSearchConfig
+from search_space import DefaultSearchSpace
 
 from dataclasses import fields
 import trieste
@@ -43,8 +44,6 @@ np_config.enable_numpy_behavior()
 MOL_FILE_NAME = None
 NORM_ENERGY = 0.
 
-DIHEDRAL_IDS = []
-
 CUR_ADD_POINTS = []
 
 global_degrees = []
@@ -61,6 +60,8 @@ acq_vals_log = []
 LAST_OPT_OK = True
 
 MINIMA = []
+
+search_space_env = None
 
 def degrees_to_potentials(
     degrees : np.ndarray,
@@ -118,7 +119,14 @@ def calc(dihedrals : list[float]) -> float:
 
     #Pre-opt
     print('Optimizing constrained struct')
-    en, preopt_status = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, constrained_opt=True)
+    en, preopt_status = calc_energy(
+        MOL_FILE_NAME, 
+        dihedrals=list(zip(search_space_env.dihedral_ids, dihedrals)), 
+        norm_energy=NORM_ENERGY, 
+        save_structs=True, 
+        constrained_opt=True,
+        force_xyz_block=search_space_env.get_xyz_block_from_coords(dihedrals)
+    )
     LAST_OPT_OK = preopt_status
     print(f"Status of preopt: {preopt_status}; LAST_OPT_OK: {LAST_OPT_OK}")
     if not preopt_status:
@@ -129,7 +137,13 @@ def calc(dihedrals : list[float]) -> float:
     print('Optimized!\nLoading xyz from preopt')
     xyz_from_constrained = load_last_optimized_structure_xyz_block(MOL_FILE_NAME)
     print('Loaded!\nFull opt')
-    en, opt_status = calc_energy(MOL_FILE_NAME, list(zip(DIHEDRAL_IDS, dihedrals)), NORM_ENERGY, True, force_xyz_block=xyz_from_constrained)
+    en, opt_status = calc_energy(
+        MOL_FILE_NAME, 
+        dihedrals=list(zip(search_space_env.dihedral_ids, dihedrals)), 
+        norm_energy=NORM_ENERGY, 
+        save_structs=True, 
+        force_xyz_block=xyz_from_constrained
+    )
     LAST_OPT_OK = opt_status
     print(f"Status of opt: {opt_status}; LAST_OPT_OK: {LAST_OPT_OK}")
     print(f'Optimized! En = {en}')
@@ -187,7 +201,7 @@ def upd_dataset_from_trj(
     print(f"Input dataset is: {dataset}") 
     parsed_data, last_point = parse_points_from_trj(
         trj_file_name=trj_filename, 
-        dihedrals=DIHEDRAL_IDS, 
+        dihedrals=search_space_env.dihedral_ids, 
         norm_en=NORM_ENERGY, 
         save_structs=True, 
         structures_path=structures_path, 
@@ -287,40 +301,40 @@ load_params_from_config({field.name : getattr(config, field.name) for field in f
 
 print("Coef calculator creatring")
 
-coef_matrix = CoefCalculator(
-    mol=Chem.RemoveHs(Chem.MolFromMolFile(MOL_FILE_NAME)),
-    config=config, 
-    dir_for_inps=f"{exp_name}_scans/", 
-    db_connector=LocalConnector('dihedral_logs.db')
-).coef_matrix()
+search_space_env = DefaultSearchSpace(mol=Chem.MolFromMolFile(MOL_FILE_NAME, removeHs=False), config=config)
 
-print("Coef calculator created!")
+search_space = Box(*search_space_env.configure_search_space())  # define the search space directly
 
-mean_func_coefs = []
+#coef_matrix = CoefCalculator(
+#    mol=Chem.RemoveHs(Chem.MolFromMolFile(MOL_FILE_NAME)),
+#    config=config, 
+#    dir_for_inps=f"{exp_name}_scans/", 
+#    db_connector=LocalConnector(config.dihedral_logs)
+#).coef_matrix()
 
-for ids, coefs in coef_matrix:
-    DIHEDRAL_IDS.append(ids)
-    mean_func_coefs.append(coefs)
+#print("Coef calculator created!")
 
-print("Dihedral ids", DIHEDRAL_IDS)
-print("Mean func coefs", mean_func_coefs)
+#mean_func_coefs = []
 
-search_dim = len(DIHEDRAL_IDS)
+#for ids, coefs in coef_matrix:
+#    DIHEDRAL_IDS.append(ids)
+#    mean_func_coefs.append(coefs)
+
+print("Dihedral ids", search_space_env.dihedral_ids)
+
+search_dim = len(search_space_env.dihedral_ids)
 
 print("Cur search dim is", search_dim)
 
-amps = np.array([
-    np.abs(mean_func_coefs[i][:3]).sum() for i in range(len(mean_func_coefs))
-])
-
-potential_func = PotentialFunction(mean_func_coefs)
-
-kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)]) + TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
+kernel = gpflow.kernels.White(0.001) + gpflow.kernels.Periodic(gpflow.kernels.RBF(variance=0.07, lengthscales=0.005, active_dims=[i for i in range(search_dim)]), period=[2*np.pi for _ in range(search_dim)]) 
 
 kernel.kernels[1].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
-kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
 
-search_space = Box([0. for _ in range(search_dim)], [2 * np.pi for _ in range(search_dim)])  # define the search space directly
+if config.use_pi_kernel:
+    print("Use phycics-informed potential-based kernel!")
+    potential_func = PotentialFunction(search_space_env.mean_func_coefs)
+    kernel += TransformKernel(potential_func, gpflow.kernels.RBF(variance=0.12, lengthscales=0.005, active_dims=[i for i in range(search_dim)])) # ls 0.005 var 0.3 -> 0.15
+    kernel.kernels[2].base_kernel.lengthscales.prior = tfp.distributions.LogNormal(loc=tf.constant(0.005, dtype=tf.float64), scale=tf.constant(0.001, dtype=tf.float64))
 
 #Calc normalizing energy
 #in kcal/mol!
@@ -339,7 +353,7 @@ if config.load_ensemble:
     dataset = Dataset(
         *EnsembleProcessor(
             config.load_ensemble,
-            dihedral_idxs=DIHEDRAL_IDS
+            dihedral_idxs=search_space_env.dihedral_ids,
         ).normalize_energy(NORM_ENERGY).get_tf_data()
     )
     print(f"Init dataset collected!\n{dataset}")
