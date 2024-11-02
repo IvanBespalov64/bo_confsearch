@@ -351,7 +351,7 @@ if config.load_ensemble:
     dataset = Dataset(
         *EnsembleProcessor(
             config.load_ensemble,
-            dihedral_idxs=search_space_env.dihedral_ids,
+            search_space_env=search_space_env,
         ).normalize_energy(NORM_ENERGY).get_tf_data()
     )
     print(f"Init dataset collected!\n{dataset}")

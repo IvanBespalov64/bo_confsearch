@@ -3,12 +3,13 @@ import tensorflow as tf
 from typing import List, Tuple, Callable#, Self
 
 from calc import dihedral_angle, HARTRI_TO_KCAL
+from search_space import SearchSpace
 
 class EnsembleProcessor:
     def __init__(
         self,
         ensemble_filename : str,
-        dihedral_idxs : List[List[int]],
+        search_space_env : SearchSpace,
         parse_energy_from_xyz_2nd_line : Callable[[str], float] = lambda s: float(s.split()[-1])*HARTRI_TO_KCAL
     ) -> None:
         """
@@ -17,8 +18,7 @@ class EnsembleProcessor:
 
             Args:
                 ensembel_filename - filename of ensemble
-                dihedral_idxs - list of 4-element lists with atom idxs.
-                    angles given in expected order
+                search_space_env - object of current SearchSpace
                 parse_energy_from_xyz_2nd_line - function that will apply 
                     to the 2nd line of .xyz file and return Energy in kcal/mol
         """
@@ -41,17 +41,13 @@ class EnsembleProcessor:
         self.energies = [parse_energy_from_xyz_2nd_line(xyz_block.split('\n')[1]) for xyz_block in xyz_blocks]
 
         for raw_xyz in xyz_blocks:
-            coords = [list(map(float, cur.split()[1:])) for cur in raw_xyz.split('\n')[2:]]
-            if len(coords[-1]) == 0:
-                coords.pop()
-            dihedrals = []
-            for i, j, k, l in dihedral_idxs:
-                dihedrals.append(
-                    dihedral_angle(
-                        coords[i], coords[j], coords[k], coords[l]
-                    )
+            self.processed_ens.append(
+                search_space_env.get_coords_from_xyz_block(
+                    "\n".join(
+                        raw_xyz.split("\n")[2:]    
+                    ).strip()    
                 )
-            self.processed_ens.append(dihedrals)
+            )
 
     def normalize_energy(
         self,

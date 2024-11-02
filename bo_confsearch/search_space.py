@@ -170,7 +170,7 @@ class DefaultSearchSpace(SearchSpace):
             res =  -np.arctan2(np.dot(m, nJKL) / np.sqrt(lengthSq(m) * lengthSq(nJKL)),\
                        np.dot(nIJK, nJKL) / np.sqrt(lengthSq(nIJK) * lengthSq(nJKL)))
             return (res + 2 * np.pi) % (2 * np.pi)
-        
+       
         coords = np.asarray([list(map(float, line.strip().split()[1:])) for line in xyz_block.split('\n')])
 
         res = []
