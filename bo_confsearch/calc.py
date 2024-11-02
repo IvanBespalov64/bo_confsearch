@@ -2,7 +2,6 @@ import os
 import os.path
 import time
 import math
-from typing import Union
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem import rdMolTransforms
@@ -10,7 +9,7 @@ import numpy as np
 
 from sklearn.cluster import KMeans
 
-from typing import Dict
+from typing import Dict, Union
 
 from default_vals import ConfSearchConfig
 
@@ -128,6 +127,7 @@ def change_dihedrals(mol_file_name : str,
         print("No such file!")
         return None
 
+#DEPRECATED
 def to_degrees(dihedrals : list[dihedral]) -> list[dihedral]:
     """
         Convert rads to degrees in dihedrals
@@ -150,46 +150,53 @@ def read_xyz(name : str) -> list[str]:
     return '\n'.join(xyz)
 
 def generate_oinp(
-        coords : str, 
-        dihedrals : list[dihedral],
-        gjf_name : str, 
-        num_of_procs : int, 
-        method_of_calc : str,
-        charge : int,
-        multipl : int,
-        constrained_opt : bool = False
-    ) -> None:
+    coords : str, 
+    oinp_name : str, 
+    num_of_procs : int, 
+    method_of_calc : str,
+    charge : int,
+    multipl : int,
+    constraint_block : Union[str, None] = None
+) -> None:
     """
         generates orca .inp file
     """
-    with open(gjf_name, 'w+') as file:
+    with open(oinp_name, 'w+') as file:
         opt_cmd = "opt"
         if TS:
             opt_cmd = "OptTS"
         file.write("!" + method_of_calc + f" {opt_cmd}\n")
         file.write("%pal\nnprocs " + str(num_of_procs) + "\nend\n")
-        if constrained_opt:
+        if constraint_block:
             file.write("%geom Constraints\n")
-            dihedrals = to_degrees(dihedrals)
-            for cur in dihedrals:
-                a, d = cur
-                file.write("{ D " + " ".join(map(str, a)) + " " + str(d) + " C }\n")
+            file.write(constraint_block)
             file.write("end\n")
             file.write("end\n")    
         file.write("* xyz " + str(charge) + " " + str(multipl) + "\n")
         file.write(coords)
         file.write("END\n")
 
-def generate_default_oinp(coords : str, dihedrals : list[dihedral], oinp_name : str, constrained_opt : bool = False):
-    generate_oinp(coords, dihedrals, oinp_name, NUM_OF_PROCS, ORCA_METHOD,\
-                                                CHARGE, MULTIPL, constrained_opt=constrained_opt)
-def start_calc(gjf_name : str):
+def generate_default_oinp(
+    coords : str, 
+    oinp_name : str, 
+    constraint_block : Union[str, None] = None
+) -> None:
+    generate_oinp(
+        coords=coords, 
+        oinp_name=oinp_name, 
+        num_of_procs=NUM_OF_PROCS, 
+        method_of_calc=ORCA_METHOD,
+        charge=CHARGE, 
+        multipl=MULTIPL, 
+        constraint_block=constraint_block
+    )
+def start_calc(oinp_name : str):
     """
         Running calculation
     """	
-    sbatch_name = gjf_name.split('/')[-1][:-4] + ".sh"
+    sbatch_name = oinp_name.split('/')[-1][:-4] + ".sh"
     os.system("cp sbatch_temp " + sbatch_name)
-    os.system("echo \"" + ORCA_EXEC_COMMAND + " " + gjf_name + " > " + gjf_name[:-4] + ".out\"" + " >> " + sbatch_name) 
+    os.system("echo \"" + ORCA_EXEC_COMMAND + " " + oinp_name + " > " + oinp_name[:-4] + ".out\"" + " >> " + sbatch_name) 
     os.system("sbatch " + sbatch_name)    
 
 def mol_to_inp_name(mol_file_name : str) -> str:
@@ -264,13 +271,12 @@ def check_is_broken(
     return False
  
 def calc_energy(
-        mol_file_name : str,
-        dihedrals : list[dihedral] = [],
-        norm_energy : float = 0, 
-        save_structs : bool = True,
-        constrained_opt : bool = False,
-        force_xyz_block : Union[None, str] = None
-    ) -> float:
+    mol_file_name : str,
+    norm_energy : float = 0, 
+    save_structs : bool = True,
+    constraint_block : Union[str, None] = None,
+    xyz_block : Union[None, str] = None
+) -> float:
     """
         calculates energy of molecule from 'mol_file_name'
         with current properties and returns it as float
@@ -279,17 +285,19 @@ def calc_energy(
 
     print(f"Calc with save_struct={save_structs}")
 
-    xyz_upd = None
+    xyz_coords = None
     
-    if force_xyz_block:
-        xyz_upd = force_xyz_block
+    if xyz_block is None:
+        xyz_coords = "\n".join(
+            Chem.MolToXYZBlock(
+                Chem.MolFromMolFile(mol_file_name, removeHs=False)
+            ).split('\n')[2:]
+        )
+        print(xyz_coords)
     else:
-        xyz_upd = change_dihedrals(mol_file_name, dihedrals)
+        xyz_coords = xyz_block
 
-    print(dihedrals)
-    print(list(zip(*dihedrals)))
-
-    if check_is_broken(xyz_upd, BOND_LENGTH_THRESHOLD):
+    if check_is_broken(xyz_coords, BOND_LENGTH_THRESHOLD):
         print(f"Seems that some atoms in current structure is closer then {BOND_LENGTH_THRESHOLD}!")
         print(f"Returning broken_struct_energy that is {BROKEN_STRUCT_ENERGY}")
         return BROKEN_STRUCT_ENERGY, False
@@ -300,7 +308,7 @@ def calc_energy(
     out_name = inp_to_out_name(inp_name)
     if os.path.isfile(out_name):
         os.system("rm -r " + out_name)
-    generate_default_oinp(xyz_upd, dihedrals, inp_name, constrained_opt=constrained_opt)
+    generate_default_oinp(xyz_coords, inp_name, constraint_block=constraint_block)
     start_calc(inp_name)
     wait_for_the_end_of_calc(out_name, 1000)
     res, opt_status = find_energy_in_log(out_name) 
@@ -345,7 +353,7 @@ def dihedral_angle(a : list[float], b : list[float], c : list[float], d : list[f
        
 def parse_points_from_trj(
     trj_file_name : str,
-    dihedrals : list,
+    search_space_env : 'SearchSpace', 
     norm_en : float, 
     save_structs : bool = True,
     structures_path : str = "structs/", 
@@ -368,20 +376,21 @@ def parse_points_from_trj(
     with open(trj_file_name, "r") as file:
         lines = [line[:-1] for line in file]
         n = int(lines[0])
-        print(f"dihedrals: {dihedrals}")
-        print(f"Lines: {lines}")
         for i in range(len(lines) // (n + 2)):
             structures.append("\n".join(lines[i * (n + 2) : (i + 1) * (n + 2)]))
             
             energy = float(lines[i * (n + 2) + 1].split()[-1]) * HARTRI_TO_KCAL - norm_en
-            cur_d = []
-            for a, b, c, d in dihedrals:
-                a_coord = list(map(float, lines[i * (n + 2) + 2 + a].split()[1:]))
-                b_coord = list(map(float, lines[i * (n + 2) + 2 + b].split()[1:]))
-                c_coord = list(map(float, lines[i * (n + 2) + 2 + c].split()[1:]))
-                d_coord = list(map(float, lines[i * (n + 2) + 2 + d].split()[1:]))    
-                cur_d.append(dihedral_angle(a_coord, b_coord, c_coord, d_coord))
-            result.append((cur_d, energy))
+            
+            result.append(
+                (
+                    search_space_env.get_coords_from_xyz_block(
+                        "\n".join(
+                            structures[-1].split('\n')[2:]
+                        )
+                    ), 
+                    energy
+                )
+            )
     
     print(f"Points in trj: {len(result)}")
     

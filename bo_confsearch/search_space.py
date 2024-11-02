@@ -49,6 +49,21 @@ class SearchSpace(ABC):
         pass
 
     @abstractmethod
+    def get_orca_constraints_block(
+        self,
+        coordinates : List[float]
+    ) -> str:
+        """
+            Returns ORCA constaints block for required conformer
+            Args:
+                coordinates : list of coordinates
+            Returns:
+                ORCA constraints block
+
+        """
+        pass
+
+    @abstractmethod
     def get_coords_from_xyz_block(
         self,
         xyz_block : str
@@ -59,6 +74,18 @@ class SearchSpace(ABC):
                 xyz_block: XYZ coords block
             Returns:
                 list of coordinates in defined search space
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def dim(
+        self
+    ) -> int:
+        """
+            Calculates number of dimensions of search space
+            Returns:
+                number of dimensions
         """
         pass
 
@@ -90,6 +117,12 @@ class DefaultSearchSpace(SearchSpace):
 
         return [[0 for _ in range(len(self.dihedral_ids))], [2*np.pi for _ in range(len(self.dihedral_ids))]]
 
+    @property
+    def dim(
+        self        
+    ) -> int:
+        return len(self.dihedral_ids)
+
     def get_xyz_block_from_coords(
         self,
         coordinates : List[float]
@@ -101,6 +134,15 @@ class DefaultSearchSpace(SearchSpace):
             rdMolTransforms.SetDihedralRad(tmp_mol.GetConformer(), *atom_idxs, value)
 
         return '\n'.join(Chem.MolToXYZBlock(tmp_mol).split('\n')[2:])
+
+    def get_orca_constraints_block(
+        self,
+        coordinates : List[float]
+    ) -> str:
+        res = ""
+        for atom_idxs, value in zip(self.dihedral_ids, coordinates):
+            res += "{ " + f"D {atom_idxs[0]} {atom_idxs[1]} {atom_idxs[2]} {atom_idxs[3]} {value * 180 / np.pi} C" + " }\n"
+        return res
 
     def get_coords_from_xyz_block(
         self,
@@ -129,7 +171,7 @@ class DefaultSearchSpace(SearchSpace):
                        np.dot(nIJK, nJKL) / np.sqrt(lengthSq(nIJK) * lengthSq(nJKL)))
             return (res + 2 * np.pi) % (2 * np.pi)
         
-        coords = np.asarray([list(map(float, line.strip().split('\t'))) for line in xyz_block.split('\n')])
+        coords = np.asarray([list(map(float, line.strip().split()[1:])) for line in xyz_block.split('\n')])
 
         res = []
         for a, b, c, d in self.dihedral_ids:
