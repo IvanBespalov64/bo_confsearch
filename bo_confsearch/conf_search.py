@@ -33,6 +33,7 @@ import os
 import yaml
 import json
 import argparse
+import time
 
 from trieste.acquisition.function import ExpectedImprovement
 
@@ -255,6 +256,8 @@ class PotentialFunction():
             ],
             axis=1
         )
+
+start_time = time.perf_counter()
 
 parser = argparse.ArgumentParser(
     prog="bo_confsearch",
@@ -502,6 +505,9 @@ print(f"Results of clustering: {res}\nThere are relative energy and number of st
 json.dump(res, open(f'{exp_name}_clustering_results.json', 'w'))
 
 print(f"Saving final ensemble into `{exp_name}_final_ensemble.xyz`")
+
+print(f"Time elapsed: {time.perf_counter() - start_time} s")
+
 ens_xyz_str = ""
 for _, structure_id in res.values():
     cur_xyz = ""
