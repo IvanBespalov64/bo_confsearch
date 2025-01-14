@@ -59,11 +59,13 @@ class CoefCalculator:
         self.db_connector = db_connector
         self.aromatic_to_aliphatic = aromatic_to_aliphatic
 
-        self.case_sensetive_atoms = [
-            cur for cur in [
-                Chem.PeriodicTable.GetElementSymbol(Chem.GetPeriodicTable(), idx) for idx in range(1, 119)
-            ] if cur.upper() != cur
-        ]
+        #self.case_sensetive_atoms = [
+        #    cur for cur in [
+        #        Chem.PeriodicTable.GetElementSymbol(Chem.GetPeriodicTable(), idx) for idx in range(1, 119)
+        #    ] if cur.upper() != cur
+        #]
+        
+        self.case_sensetive_atoms = ['Cl', 'Br']
 
         self.scanfile2smiles = {} # k - scan_file, v - smiles
         self.fetched_coefs = {} # k - smiles, v - coefs
@@ -139,6 +141,10 @@ class CoefCalculator:
             return False
 
         if bond.IsInRing():
+            return False
+
+        if all([atom.GetSymbol() == 'H' for atom in bond.GetBeginAtom().GetNeighbors() if atom.GetIdx() != bond.GetEndAtomIdx()]) or\
+            all([atom.GetSymbol() == 'H' for atom in bond.GetEndAtom().GetNeighbors() if atom.GetIdx() != bond.GetBeginAtomIdx()]):
             return False
 
         if not self.skip_triple_equal_terminal_atoms:
@@ -295,24 +301,26 @@ class CoefCalculator:
             rotable_frag_smiles = self._sanitize_smiles(rotable_frag_smiles)
 
             rotable_frags.append(
-                Chem.MolFromSmiles(
-                    rotable_frag_smiles
+                Chem.AddHs(
+                    Chem.MolFromSmiles(
+                        rotable_frag_smiles
+                    )
                 )
             )
 
             print(f"rot_frag_smiles: {rotable_frag_smiles}\nidxs_to_rotate: {self.get_idxs_to_rotate(rotable_frags[-1])}")
 
             query_result = self.mol.GetSubstructMatches(
-                Chem.MolFromSmiles(
-                    self._sanitize_smiles(
+                Chem.MolFromSmarts(
+                    # self._sanitize_smiles(
                         Chem.rdmolfiles.MolFragmentToSmiles(
                             rotable_frags[-1],
                             atomsToUse=self.get_idxs_to_rotate(rotable_frags[-1])
-                        )
-                    )
+                        ).replace('Cl', '[#17]').replace('Br', '[#35]').replace('C', '[#6]').replace('N', '[#7]').replace('O', '[#8]').replace('P', '[#15]').replace('B', '[#5]').replace('S', '[#16]').replace('[[', '[').replace(']]', ']').replace(']+', '+').replace(']-', '-')
+                    # )
                 )
             )
-    
+
             print(f"query_result: {query_result}")
 
             old_idxs = ()
