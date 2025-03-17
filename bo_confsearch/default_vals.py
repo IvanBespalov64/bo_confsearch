@@ -21,7 +21,8 @@ class ConfSearchConfig:
     exp_name : str = "cs"
     load_ensemble : Union[str, None] = None
     acquisition_function : str = "iv"
-        
+    dihedral_logs : str = "dihedral_logs.db"
+    use_pi_kernel : bool = True
 #ORCA_EXEC_COMMAND = "/opt/orca5/orca"
 #DEFAULT_NUM_OF_PROCS = 8
 #DEFAULT_METHOD = "RHF/STO-3G"
