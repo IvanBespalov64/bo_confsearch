@@ -2,9 +2,9 @@ mol_file_name : "tests/mol_83.mol"
 exp_name: "mol_83_tmp_1"
 spin_multiplicity : 1
 charge : 0
-orca_exec_command: "/opt/orca5/orca"
+orca_exec_command: "/home/users/bespalovi/orca5"
 num_of_procs : 8
-orca_method : "hf-3c cpcm(water)"
+orca_method : "xtb2 alpb(water)"
 broken_struct_energy : 100.
 bond_length_threshold : 0.7
 rolling_window_size : 5

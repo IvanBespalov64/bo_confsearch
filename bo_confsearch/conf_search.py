@@ -411,9 +411,13 @@ early_termination_flag = False
 
 print(f"MINIMA: {MINIMA}")
 
+timer = None
+
 for step in range(1, config.max_steps+1):
     print(f"Previous last_opt_ok: {LAST_OPT_OK}")
     print(f"Step number {step}")
+
+    timer = time.perf_counter()
 
     try:
         result = bo.optimize(1, dataset, model, rule, fit_initial_model=False)
@@ -452,6 +456,8 @@ for step in range(1, config.max_steps+1):
         print(f"Last optimization finished with error, skipping trj parsing!")
     model.update(dataset)
     model.optimize(dataset)
+
+    print(f"Time elapsed: {time.perf_counter() - timer}")
 
     print("Updating model checkpoint!")
     model_chk = gpflow.utilities.deepcopy(model.model)
