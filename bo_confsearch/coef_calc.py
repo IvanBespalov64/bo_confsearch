@@ -50,6 +50,7 @@ class CoefCalculator:
         self.charge = config.charge
         self.multipl = config.spin_multiplicity
         self.degrees = degrees
+        self.exp_name = config.exp_name
 
         # Key is SMILES, val is idx
         self.unique_frags = {}
@@ -417,7 +418,7 @@ class CoefCalculator:
                            0)
             xyz = Chem.MolToXYZBlock(cur_mol)
             idxs_to_rotate = self.get_idxs_to_rotate(cur_mol)
-            filename = self.dir_for_inps + "scan_" + str(angle_number) + ".inp"
+            filename = self.dir_for_inps + self.exp_name + "_scan_" + str(angle_number) + ".inp"
             self.generate_scan_inp(
                 xyz=self.get_coords_from_xyz_block(xyz), 
                 idxs_to_rotate=idxs_to_rotate, 
@@ -476,6 +477,7 @@ class CoefCalculator:
         """
         res = []
         inp_filenames = []
+        print(self.fetched_coefs)
         for inp_filename, energies in self.get_scans_of_dihedrals():
             inp_filenames.append(inp_filename)
             if self.scanfile2smiles[inp_filename] in self.fetched_coefs:

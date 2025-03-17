@@ -1,12 +1,16 @@
-#!/usr/bin/bash
-
 #!/bin/sh
+
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=8
 #SBATCH --ntasks-per-node=8
 #SBATCH --job-name=cs_orca
+#SBATCH --partition=hpc4-el7-3d
+
 export KMP_STACKSIZE=10G
 export OMP_STACKSIZE=10G
 export OMP_NUM_THREADS=8,1
 export MKL_NUM_THREADS=8
+
+export LD_LIBRARY_PATH=/s/ls4/groups/g0130/bespalovi/orca5/:$LD_LIBRARY_PATH
+export TMPDIR=/tmp
 
