@@ -28,8 +28,11 @@ class EnsembleProcessor:
         try:
             with open(ensemble_filename, 'r') as file:
                 current_block = ""
+                num_atoms = 1
                 for idx, line in enumerate(file):
-                    if len(line.split()) == 1 and idx > 0:
+                    if idx == 0:
+                        num_atoms = int(line.strip())
+                    if idx % (num_atoms + 2) == 0 and idx > 0:
                         xyz_blocks.append(current_block)
                         current_block = ""
                     current_block += line
@@ -37,6 +40,8 @@ class EnsembleProcessor:
         except FileNotFoundError:
             print(f"Error! No such file: {ensemble_filename}; Finishing with empty ensemble!")
             return
+
+        print(xyz_blocks)
 
         self.energies = [parse_energy_from_xyz_2nd_line(xyz_block.split('\n')[1]) for xyz_block in xyz_blocks]
 

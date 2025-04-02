@@ -396,7 +396,11 @@ def parse_points_from_trj(
     print(f"Points in trj: {len(result)}")
     
     if len(result) == 1:
-        return result
+        return result,  {
+            "coords" : result[-1][0],
+            "rel_en" : result[-1][1],
+            "xyz_block" : structures[-1]
+        }
 
     points, obs = list(zip(*result[1:]))
 
