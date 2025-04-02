@@ -4,7 +4,7 @@ spin_multiplicity : 1
 charge : 0
 orca_exec_command: "/opt/orca5/orca"
 num_of_procs : 8
-orca_method : "hf-3c cpcm(water)"
+orca_method : "xtb2 alpb(water)"
 broken_struct_energy : 100.
 bond_length_threshold : 0.7
 rolling_window_size : 5
